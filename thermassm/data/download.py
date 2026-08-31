@@ -44,7 +44,10 @@ def extract_point_series(
 ) -> tuple[np.ndarray, np.ndarray]:
     import xarray as xr
 
-    files = sorted(Path(nc_dir).glob("*.nc"))
+    files = sorted(Path(nc_dir).rglob("*.nc"))
+    if not files:
+        found = [str(p) for p in Path(nc_dir).rglob("*")][:50]
+        raise OSError(f"No .nc files found under {nc_dir}. Contents: {found}")
     ds = xr.open_mfdataset(files, combine="by_coords")
     ds = ds.sel(lat=lat, lon=lon, method="nearest")
     ds = ds.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
