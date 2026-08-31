@@ -37,7 +37,7 @@ def evaluate_epoch(model, loader, loss_fn, cfg, device):
     return total / n
 
 
-def train_model(model, train_loader, val_loader, loss_fn, cfg):
+def train_model(model, train_loader, val_loader, loss_fn, cfg, ckpt_name="best.pt"):
     device = torch.device(cfg.train.device)
     model.to(device)
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
@@ -53,5 +53,5 @@ def train_model(model, train_loader, val_loader, loss_fn, cfg):
         history["val"].append(val_loss)
         if val_loss < best_val:
             best_val = val_loss
-            torch.save(model.state_dict(), f"{cfg.train.checkpoint_dir}/best.pt")
+            torch.save(model.state_dict(), f"{cfg.train.checkpoint_dir}/{ckpt_name}")
     return history, best_val

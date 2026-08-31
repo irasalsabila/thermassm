@@ -53,7 +53,7 @@ def train_with_timing(cfg, name, loader_pair):
     model = build_model(cfg, name)
 
     def run():
-        return train_model(model, train_loader, val_loader, loss_fn(name), cfg)
+        return train_model(model, train_loader, val_loader, loss_fn(name), cfg, ckpt_name=f"{name}.pt")
 
     (history, best_val), elapsed = _time(run)
     n_params = sum(p.numel() for p in model.parameters())
@@ -85,11 +85,15 @@ def table1(cfg, epochs):
     data = (dates, t2m, features, tr, va, te)
 
     rows = []
+    rollout_save = {}
     for name in MODELS:
         model, best_val, n_params, per_epoch = train_with_timing(cfg, name, (train_loader, val_loader))
         results = run_rollouts(cfg, model, name, data)
         met = evaluate_results(results)
         steps_per_sec = _inference_speed(cfg, model, name, data)
+        if name in ("physssm", "pint-lstm", "patchtst"):
+            rollout_save[f"pred_730_{name}"] = results[730]["pred"]
+            rollout_save.setdefault("true_730", results[730]["true"])
         rows.append({
             "category": _category(name),
             "name": _pretty_name(name),
@@ -103,6 +107,9 @@ def table1(cfg, epochs):
             "val_loss": round(best_val, 4),
         })
         print(f"table1 {name}: rmse={rows[-1]['rmse']} drift={rows[-1]['drift_730']}")
+
+    if rollout_save:
+        np.savez(OUT / "rollouts_table1.npz", **rollout_save)
 
     for name, pretty in [("climatology", "Climatology (30-yr Mean)"), ("persistence", "Persistence")]:
         row = {"category": "Baselines", "name": pretty, "rmse": {}, "params": 0, "per_epoch_s": 0.0}
