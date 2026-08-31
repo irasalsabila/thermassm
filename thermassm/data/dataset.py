@@ -33,13 +33,9 @@ def load_series(cfg) -> tuple[np.ndarray, np.ndarray]:
             cfg.data.lat, cfg.data.train_years[0], cfg.data.test_years[1]
         )
     else:
-        import os
+        from .download import download_weatherbench_netcdf
 
-        wb_dir = os.path.join(cfg.data.data_dir, "weatherbench_data")
-        if not os.path.isdir(wb_dir):
-            from .download import download_weatherbench_netcdf
-
-            wb_dir = download_weatherbench_netcdf(cfg.data.data_dir)
+        wb_dir = download_weatherbench_netcdf(cfg.data.data_dir)
         dates, t2m = extract_point_series(
             wb_dir, cfg.data.lat, cfg.data.lon,
             cfg.data.train_years[0], cfg.data.test_years[1],
