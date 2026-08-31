@@ -1,0 +1,54 @@
+"""WeatherBench / ERA5 data download and extraction."""
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
+import numpy as np
+
+
+def download_weatherbench_netcdf(
+    data_dir: str = "data",
+    url: str | None = None,
+) -> str:
+    data_dir = Path(data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    zip_path = data_dir / "2m_temperature_5.625deg.zip"
+    if not zip_path.exists():
+        import subprocess
+
+        url = url or (
+            "https://dataserv.ub.tum.de/s/m1524895/download?path="
+            "%2F5.625deg%2F2m_temperature"
+        )
+        subprocess.run(
+            ["wget", url, "-O", str(zip_path)],
+            check=True,
+        )
+    extract_dir = data_dir / "weatherbench_data"
+    if not extract_dir.exists():
+        import zipfile
+
+        with zipfile.ZipFile(zip_path, "r") as zf:
+            zf.extractall(extract_dir)
+    return str(extract_dir)
+
+
+def extract_point_series(
+    nc_dir: str,
+    lat: float,
+    lon: float,
+    start_year: int = 1979,
+    end_year: int = 2022,
+    var: str = "t2m",
+) -> tuple[np.ndarray, np.ndarray]:
+    import xarray as xr
+
+    files = sorted(Path(nc_dir).glob("*.nc"))
+    ds = xr.open_mfdataset(files, combine="by_coords")
+    ds = ds.sel(lat=lat, lon=lon, method="nearest")
+    ds = ds.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
+    ds = ds[var].resample(time="1D").mean()
+    dates = ds.time.values
+    values = ds.values.astype(np.float32)
+    return dates, values
