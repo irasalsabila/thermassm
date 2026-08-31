@@ -146,13 +146,18 @@ class PatchTST(nn.Module):
         )
         self.head = nn.Linear(self.n_patches * d_model, horizon)
 
+    def _scale_input(self, x: torch.Tensor) -> torch.Tensor:
+        s = x[..., 1] / S_SCALE
+        return torch.cat([x[..., 0:1], s.unsqueeze(-1), x[..., 2:]], dim=-1)
+
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         b, l, _ = x.shape
-        x = scale_features(x)
+        x = self._scale_input(x)
 
-        mean = x.mean(dim=1, keepdim=True)
-        std = x.std(dim=1, keepdim=True) + 1e-5
-        x_norm = (x - mean) / std
+        t_mean = x[:, :, 0].mean(dim=1, keepdim=True)
+        t_std = x[:, :, 0].std(dim=1, keepdim=True) + 1e-5
+        x_norm = x.clone()
+        x_norm[:, :, 0] = (x[:, :, 0] - t_mean) / t_std
 
         last = x_norm[:, -1:].expand(-1, self.stride, -1)
         xp = torch.cat([x_norm, last], dim=1)
@@ -169,8 +174,8 @@ class PatchTST(nn.Module):
         z = z.reshape(b, self.n_patches * self.d_model)
         out = self.head(z)
 
-        t_mean = mean[..., 0].squeeze(1)
-        t_std = std[..., 0].squeeze(1)
+        t_mean = t_mean.squeeze(1)
+        t_std = t_std.squeeze(1)
         return out * t_std.unsqueeze(-1) + t_mean.unsqueeze(-1)
 
 

@@ -67,7 +67,7 @@ def rollout_recurrent(model, init_t2m, init_dates, horizon, lat, lon, device):
             feat = build_feature_vector(cur_t, n_ins, n_sin, n_cos, lat, lon)
             x_t = torch.tensor(feat, dtype=torch.float32, device=device).unsqueeze(0)
             y, state = model.step(x_t, state)
-            pred = float(np.clip(y.cpu().numpy(), TEMP_MIN, TEMP_MAX))
+            pred = float(np.clip(y.item(), TEMP_MIN, TEMP_MAX))
             preds.append(pred)
             history.append(pred)
             dates.append(next_date)
@@ -84,7 +84,7 @@ def rollout_next_step(model, init_x, init_dates, horizon, lat, lon, device):
         for _ in range(horizon):
             x_t = torch.tensor(x, dtype=torch.float32, device=device).unsqueeze(0)
             y = model(x_t)
-            pred = float(np.clip(y[0, -1].cpu().numpy(), TEMP_MIN, TEMP_MAX))
+            pred = float(np.clip(y[0, -1].item(), TEMP_MIN, TEMP_MAX))
             preds.append(pred)
             next_feat, next_date = _next_feature(x[-1], dates[-1], pred, lat, lon)
             x = np.concatenate([x, next_feat[None, :]], axis=0)[-len(x):]
