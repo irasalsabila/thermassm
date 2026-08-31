@@ -55,16 +55,29 @@ def extract_point_series(
     if not files:
         found = [str(p) for p in Path(nc_dir).rglob("*")][:50]
         raise OSError(f"No .nc files found under {nc_dir}. Contents: {found}")
-    ds = xr.open_mfdataset(files, combine="by_coords")
+
+    lat = float(lat)
     lon = float(lon)
-    lon_coords = ds.lon.values
-    if lon_coords.min() < 0:
-        lon = ((lon + 180) % 360) - 180
-    else:
-        lon = lon % 360
-    ds = ds.sel(lat=lat, lon=lon, method="nearest")
-    ds = ds.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
-    ds = ds[var].resample(time="1D").mean()
-    dates = ds.time.values
-    values = ds.values.astype(np.float32)
+    pieces = []
+    for f in files:
+        with xr.open_dataset(f) as ds:
+            lon_coords = ds.lon.values
+            if lon_coords.min() < 0:
+                lon_sel = ((lon + 180) % 360) - 180
+            else:
+                lon_sel = lon % 360
+            vname = var if var in ds else ("2m_temperature" if "2m_temperature" in ds else None)
+            if vname is None:
+                continue
+            p = ds[vname].sel(lat=lat, lon=lon_sel, method="nearest")
+            p = p.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
+            p = p.resample(time="1D").mean()
+            pieces.append(p)
+
+    if not pieces:
+        raise OSError("No matching data found for the requested variable/time range.")
+
+    series = xr.concat(pieces, dim="time").sortby("time")
+    dates = series.time.values
+    values = series.values.astype(np.float32)
     return dates, values
