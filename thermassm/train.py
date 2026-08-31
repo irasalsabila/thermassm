@@ -1,6 +1,7 @@
 """Training loop."""
 from __future__ import annotations
 
+import math
 from pathlib import Path
 
 import torch
@@ -37,22 +38,47 @@ def evaluate_epoch(model, loader, loss_fn, cfg, device):
     return total / n
 
 
+def _param_groups(model, cfg):
+    if not hasattr(model, "ebm"):
+        return model.parameters()
+    ebm_ids = {id(p) for p in model.ebm.parameters()}
+    other = [p for p in model.parameters() if id(p) not in ebm_ids]
+    return [
+        {"params": other, "lr": cfg.train.lr},
+        {"params": list(model.ebm.parameters()), "lr": cfg.train.lr_ebm},
+    ]
+
+
+def _decay_lambda(cfg, epoch, lambda_init):
+    if cfg.train.lambda_ebm_min < 0:
+        return
+    t = epoch / max(1, cfg.train.epochs - 1)
+    cfg.train.lambda_ebm = cfg.train.lambda_ebm_min + 0.5 * (
+        lambda_init - cfg.train.lambda_ebm_min
+    ) * (1 + math.cos(math.pi * t))
+
+
 def train_model(model, train_loader, val_loader, loss_fn, cfg, ckpt_name="best.pt", desc="train"):
     device = torch.device(cfg.train.device)
     model.to(device)
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     optimizer = torch.optim.AdamW(
-        model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
+        _param_groups(model, cfg), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
     )
+    lambda_init = cfg.train.lambda_ebm
     best_val = float("inf")
     history = {"train": [], "val": []}
     pbar = tqdm(range(cfg.train.epochs), desc=desc, leave=False)
     for epoch in pbar:
+        _decay_lambda(cfg, epoch, lambda_init)
         train_loss = train_epoch(model, train_loader, optimizer, loss_fn, cfg, device)
         val_loss = evaluate_epoch(model, val_loader, loss_fn, cfg, device)
         history["train"].append(train_loss)
         history["val"].append(val_loss)
-        pbar.set_postfix(train=f"{train_loss:.4f}", val=f"{val_loss:.4f}")
+        postfix = {"train": f"{train_loss:.4f}", "val": f"{val_loss:.4f}"}
+        if hasattr(model, "ebm"):
+            postfix.update(model.ebm.param_summary())
+        pbar.set_postfix(**postfix)
         if val_loss < best_val:
             best_val = val_loss
             torch.save(model.state_dict(), f"{cfg.train.checkpoint_dir}/{ckpt_name}")

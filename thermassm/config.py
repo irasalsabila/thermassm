@@ -5,14 +5,14 @@ from dataclasses import dataclass, field
 class PhysicsConfig:
     solar_constant: float = 1361.0
     stefan_boltzmann: float = 5.67e-8
-    heat_capacity: float = 5.0e7
+    heat_capacity: float = 1.0e7
     emissivity: float = 0.61
     albedo_land: float = 0.28
     albedo_ice: float = 0.62
     freeze_temp: float = 273.15
     albedo_width: float = 1.0
     init_eps: float = 0.61
-    init_heat_capacity: float = 5.0e7
+    init_heat_capacity: float = 1.0e7
 
 
 @dataclass
@@ -60,6 +60,8 @@ class TrainConfig:
     lambda_ebm: float = 0.1
     lambda_smooth: float = 0.01
     lambda_physics: float = 0.001
+    lambda_ebm_min: float = 0.01
+    lr_ebm: float = 1e-4
     device: str = "cpu"
     checkpoint_dir: str = "checkpoints"
 

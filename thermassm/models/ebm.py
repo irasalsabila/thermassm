@@ -40,6 +40,16 @@ class EBM(nn.Module):
     def step(self, t: torch.Tensor, s: torch.Tensor, dt: float = 86400.0) -> torch.Tensor:
         return t + (dt / self.heat_capacity()) * self.net_flux(t, s)
 
+    def param_summary(self) -> dict:
+        a_land = torch.sigmoid(self.albedo_land_raw).item()
+        a_ice = torch.sigmoid(self.albedo_ice_raw).item()
+        return {
+            "C": f"{self.heat_capacity().item():.2e}",
+            "eps": f"{self.emissivity().item():.3f}",
+            "a_land": f"{a_land:.3f}",
+            "a_ice": f"{a_ice:.3f}",
+        }
+
 
 def _logit(x: float) -> float:
     import numpy as np
