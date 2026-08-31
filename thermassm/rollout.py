@@ -104,6 +104,6 @@ def rollout_sequence(
 ) -> np.ndarray:
     init_t2m = t2m[:input_len]
     init_dates = dates[:input_len]
-    if is_physssm:
+    if is_physssm or hasattr(model, "step"):
         return rollout_physssm(model, init_t2m, init_dates, horizon, lat, lon, device)
     return rollout_autoregressive(model, features[:input_len], horizon, device)

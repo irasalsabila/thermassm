@@ -56,6 +56,12 @@ def extract_point_series(
         found = [str(p) for p in Path(nc_dir).rglob("*")][:50]
         raise OSError(f"No .nc files found under {nc_dir}. Contents: {found}")
     ds = xr.open_mfdataset(files, combine="by_coords")
+    lon = float(lon)
+    lon_coords = ds.lon.values
+    if lon_coords.min() < 0:
+        lon = ((lon + 180) % 360) - 180
+    else:
+        lon = lon % 360
     ds = ds.sel(lat=lat, lon=lon, method="nearest")
     ds = ds.sel(time=slice(f"{start_year}-01-01", f"{end_year}-12-31"))
     ds = ds[var].resample(time="1D").mean()

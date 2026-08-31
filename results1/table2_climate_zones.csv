@@ -1,0 +1,5 @@
+Climate Zone,Coordinates,PINT-GRU RMSE (730d),PatchTST RMSE (730d),PhysSSM-EBM RMSE (730d),Δ Improvement
+Tropical / Equatorial,"0.0N, 100.0E (Padang)",0.82,1.25,1.39,-69.7%
+Temperate Continental,"40.0N, 105.0W (Denver)",7.00,6.89,3.28,+53.2%
+Subtropical Desert,"24.4N, 54.3E (Abu Dhabi)",5.52,5.38,4.57,+17.2%
+Polar / Subarctic,"65.0N, 25.0E (Oulu)",10.15,9.61,5.55,+45.3%

@@ -69,6 +69,26 @@ class AblationPhysSSM(nn.Module):
         y, _, _ = self.forward_full(x)
         return y
 
+    def step(self, x_t, state):
+        u = self.in_proj(self._scale(x_t.unsqueeze(1)).squeeze(1))
+        ssm_out, state = self.ssm.step(u, state)
+        res = self.res_head(ssm_out).squeeze(-1)
+        mu = self._phys_prior(x_t[:, 0], x_t[:, 1])
+        if self.head == "decoupled":
+            y = mu + res
+        else:
+            y = x_t[:, 0] + res
+        return y, state
+
+    def initial_state(self, batch_size, device):
+        return torch.zeros(
+            batch_size,
+            self.cfg.model.d_model,
+            self.cfg.model.d_state,
+            dtype=torch.complex64,
+            device=device,
+        )
+
 
 ABLATION_CONFIGS = {
     "a_full": dict(physics_formulation="ebm", stability="constrained", head="decoupled"),

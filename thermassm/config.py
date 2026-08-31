@@ -29,7 +29,7 @@ class ModelConfig:
 @dataclass
 class DataConfig:
     lat: float = 40.0
-    lon: float = 105.0
+    lon: float = -105.0
     input_len: int = 90
     horizons: tuple = (365, 730, 1095)
     train_years: tuple = (1979, 2015)

@@ -1,0 +1,80 @@
+{
+  "meta": {
+    "data_source": "era5",
+    "lat": 40.0,
+    "lon": 105.0,
+    "epochs": 50,
+    "device": "cuda",
+    "input_len": 90,
+    "horizons": [
+      365,
+      730,
+      1095
+    ]
+  },
+  "rows": [
+    {
+      "model": "LSTM (Vanilla)",
+      "params": 18497,
+      "train_time_50ep_min": 1.0,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 1655
+    },
+    {
+      "model": "GRU (Vanilla)",
+      "params": 13889,
+      "train_time_50ep_min": 0.93,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 1838
+    },
+    {
+      "model": "RNN (Vanilla)",
+      "params": 4673,
+      "train_time_50ep_min": 0.88,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 1919
+    },
+    {
+      "model": "PINT-LSTM",
+      "params": 18498,
+      "train_time_50ep_min": 1.21,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 1629
+    },
+    {
+      "model": "PINT-GRU",
+      "params": 13890,
+      "train_time_50ep_min": 1.18,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 1725
+    },
+    {
+      "model": "PatchTST",
+      "params": 107216,
+      "train_time_50ep_min": 2.31,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 933
+    },
+    {
+      "model": "Vanilla S4D",
+      "params": 25153,
+      "train_time_50ep_min": 1.52,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 992
+    },
+    {
+      "model": "ClimODE 1D",
+      "params": 9217,
+      "train_time_50ep_min": 19.46,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 69
+    },
+    {
+      "model": "PhysSSM-EBM (Ours)",
+      "params": 33542,
+      "train_time_50ep_min": 2.52,
+      "peak_vram": "0.02 GB",
+      "steps_per_sec": 818
+    }
+  ]
+}

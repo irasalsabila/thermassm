@@ -1,0 +1,6 @@
+Configuration,Physics Formulation,Stability Constraint (A),Output Head,730d RMSE (K),Drift (K/yr),Extreme CSI₉₅
+(a) Full Model,Stefan-Boltzmann EBM,Re(A) <= -delta (Lyapunov),Decoupled (mu_phys + R_theta),14.94,7.96,0.00
+(b) Toy Physics,Simple Harmonic (SHO),Re(A) <= -delta (Lyapunov),Decoupled,13.90,7.63,0.00
+(c) No Physics,None,Re(A) <= -delta (Lyapunov),Monolithic,13.92,7.55,0.00
+(d) Unconstrained,Stefan-Boltzmann EBM,Unconstrained A,Decoupled,14.93,7.95,0.00
+(e) Monolithic Head,Stefan-Boltzmann EBM,Re(A) <= -delta (Lyapunov),Monolithic y = f(h),14.32,9.03,0.00

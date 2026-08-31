@@ -1,0 +1,62 @@
+{
+  "meta": {
+    "data_source": "era5",
+    "lat": 40.0,
+    "lon": 105.0,
+    "epochs": 50,
+    "device": "cuda",
+    "input_len": 90,
+    "horizons": [
+      365,
+      730,
+      1095
+    ]
+  },
+  "rows": [
+    {
+      "config": "(a) Full Model",
+      "physics": "Stefan-Boltzmann EBM",
+      "stability": "Re(A) <= -delta (Lyapunov)",
+      "head": "Decoupled (mu_phys + R_theta)",
+      "rmse_730": 14.943,
+      "drift": 7.957,
+      "csi95": 0.0
+    },
+    {
+      "config": "(b) Toy Physics",
+      "physics": "Simple Harmonic (SHO)",
+      "stability": "Re(A) <= -delta (Lyapunov)",
+      "head": "Decoupled",
+      "rmse_730": 13.898,
+      "drift": 7.635,
+      "csi95": 0.0
+    },
+    {
+      "config": "(c) No Physics",
+      "physics": "None",
+      "stability": "Re(A) <= -delta (Lyapunov)",
+      "head": "Monolithic",
+      "rmse_730": 13.918,
+      "drift": 7.554,
+      "csi95": 0.0
+    },
+    {
+      "config": "(d) Unconstrained",
+      "physics": "Stefan-Boltzmann EBM",
+      "stability": "Unconstrained A",
+      "head": "Decoupled",
+      "rmse_730": 14.93,
+      "drift": 7.954,
+      "csi95": 0.0
+    },
+    {
+      "config": "(e) Monolithic Head",
+      "physics": "Stefan-Boltzmann EBM",
+      "stability": "Re(A) <= -delta (Lyapunov)",
+      "head": "Monolithic y = f(h)",
+      "rmse_730": 14.317,
+      "drift": 9.034,
+      "csi95": 0.0
+    }
+  ]
+}
