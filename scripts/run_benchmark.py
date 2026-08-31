@@ -10,6 +10,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import numpy as np
 import torch
+from tqdm import tqdm
 
 from thermassm.ablations import AblationPhysSSM, ABLATION_CONFIGS
 from thermassm.experiment import (
@@ -63,7 +64,7 @@ def train_with_timing(cfg, name, loader_pair, t_mean=0.0, t_std=1.0):
     model = build_model(cfg, name, t_mean, t_std)
 
     def run():
-        return train_model(model, train_loader, val_loader, loss_fn(name), cfg, ckpt_name=f"{name}.pt")
+        return train_model(model, train_loader, val_loader, loss_fn(name), cfg, ckpt_name=f"{name}.pt", desc=name)
 
     (history, best_val), elapsed = _time(run)
     n_params = sum(p.numel() for p in model.parameters())
@@ -81,7 +82,7 @@ def table1(cfg, epochs):
 
     rows = []
     rollout_save = {}
-    for name in MODELS:
+    for name in tqdm(MODELS, desc="table1"):
         mode, predict_len, _ = model_spec(name, cfg)
         train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len)
         val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len)
@@ -140,7 +141,7 @@ def table1(cfg, epochs):
 def table2(cfg, epochs):
     cfg.train.epochs = epochs
     rows = []
-    for zone, lat, lon, coords in ZONES:
+    for zone, lat, lon, coords in tqdm(ZONES, desc="table2"):
         zcfg = make_config(
             **{"data.lat": lat, "data.lon": lon, "data.use_synthetic": cfg.data.use_synthetic,
                "train.device": cfg.train.device, "train.epochs": epochs}
@@ -191,7 +192,7 @@ def table3(cfg, epochs):
         "e_monolithic": ["(e) Monolithic Head", "Stefan-Boltzmann EBM", "Re(A) <= -delta (Lyapunov)", "Monolithic y = f(h)"],
     }
     rows = []
-    for key, kw in ABLATION_CONFIGS.items():
+    for key, kw in tqdm(ABLATION_CONFIGS.items(), desc="table3"):
         torch.manual_seed(cfg.train.seed)
         np.random.seed(cfg.train.seed)
         model = AblationPhysSSM(cfg, **kw)
