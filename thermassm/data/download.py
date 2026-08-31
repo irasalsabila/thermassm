@@ -26,11 +26,18 @@ def download_weatherbench_netcdf(
             check=True,
         )
     extract_dir = data_dir / "weatherbench_data"
-    if not extract_dir.exists():
+    extract_dir.mkdir(parents=True, exist_ok=True)
+    if not any(extract_dir.rglob("*.nc")):
         import zipfile
 
-        with zipfile.ZipFile(zip_path, "r") as zf:
-            zf.extractall(extract_dir)
+        nested_zips = list(extract_dir.rglob("*.zip"))
+        if not nested_zips:
+            with zipfile.ZipFile(zip_path, "r") as zf:
+                zf.extractall(extract_dir)
+            nested_zips = list(extract_dir.rglob("*.zip"))
+        for nested in nested_zips:
+            with zipfile.ZipFile(nested, "r") as zf:
+                zf.extractall(nested.parent)
     return str(extract_dir)
 
 
