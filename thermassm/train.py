@@ -1,6 +1,8 @@
 """Training loop."""
 from __future__ import annotations
 
+from pathlib import Path
+
 import torch
 from tqdm import tqdm
 
@@ -38,6 +40,7 @@ def evaluate_epoch(model, loader, loss_fn, cfg, device):
 def train_model(model, train_loader, val_loader, loss_fn, cfg):
     device = torch.device(cfg.train.device)
     model.to(device)
+    Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     optimizer = torch.optim.AdamW(
         model.parameters(), lr=cfg.train.lr, weight_decay=cfg.train.weight_decay
     )
