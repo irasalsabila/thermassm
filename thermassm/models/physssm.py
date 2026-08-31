@@ -25,7 +25,7 @@ class PhysSSM(nn.Module):
         m = cfg.model
         self.cfg = cfg
         self.in_proj = nn.Linear(m.input_dim, m.d_model)
-        self.ssm = S4D(m.d_model, m.d_state, m.delta, constrained=True)
+        self.ssm = S4D(m.d_model, m.d_state, mode="lyapunov", init="s4d-lin", delta=m.delta)
         self.res_head = nn.Sequential(
             nn.Linear(m.d_model, m.decoder_hidden),
             nn.GELU(),

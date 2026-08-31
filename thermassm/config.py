@@ -24,6 +24,17 @@ class ModelConfig:
     dt_min: float = 0.001
     dt_max: float = 0.1
     decoder_hidden: int = 128
+    num_layers: int = 2
+    dropout: float = 0.1
+    pint_block: int = 30
+    patch_len: int = 16
+    patch_stride: int = 8
+    patch_layers: int = 3
+    patch_heads: int = 16
+    patch_d_model: int = 128
+    patch_ffn: int = 256
+    patch_dropout: float = 0.2
+    patch_horizon: int = 96
 
 
 @dataclass
@@ -48,6 +59,7 @@ class TrainConfig:
     seed: int = 0
     lambda_ebm: float = 0.1
     lambda_smooth: float = 0.01
+    lambda_physics: float = 0.001
     device: str = "cpu"
     checkpoint_dir: str = "checkpoints"
 

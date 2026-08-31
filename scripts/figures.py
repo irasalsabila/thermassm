@@ -45,6 +45,9 @@ def main():
         print("Using saved rollouts from", npz)
     else:
         dates, t2m, features, tr, va, te = load_and_split(cfg)
+        from thermassm.experiment import get_t_stats
+
+        t_mean, t_std = get_t_stats(t2m, tr)
         data = (dates, t2m, features, tr, va, te)
         horizon = 730
         test_start = int(np.argmax(te))
@@ -52,7 +55,7 @@ def main():
         true = t2m[test_start + input_len : test_start + input_len + horizon]
         preds = {}
         for name in ["physssm", "pint-lstm", "patchtst"]:
-            model = build_model(cfg, name)
+            model = build_model(cfg, name, t_mean, t_std)
             ckpt = f"{cfg.train.checkpoint_dir}/{name}.pt"
             if Path(ckpt).exists():
                 model.load_state_dict(torch.load(ckpt, map_location=args.device))

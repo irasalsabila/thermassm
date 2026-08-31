@@ -27,9 +27,11 @@ def composite_loss(model, x: torch.Tensor, y_target: torch.Tensor, cfg) -> torch
 
 def baseline_loss(model, x: torch.Tensor, y_target: torch.Tensor, cfg) -> torch.Tensor:
     y = model(x)
+    if hasattr(model, "t_mean") and hasattr(model, "t_std"):
+        y_target = (y_target - model.t_mean) / (model.t_std + 1e-8)
     loss = F.mse_loss(y, y_target)
     if hasattr(model, "sho_loss"):
-        loss = loss + cfg.train.lambda_ebm * model.sho_loss(y)
+        loss = loss + cfg.train.lambda_physics * model.sho_loss(y)
     return loss
 
 

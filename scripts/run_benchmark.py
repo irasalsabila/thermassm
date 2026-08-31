@@ -16,8 +16,12 @@ from thermassm.experiment import (
     build_model,
     climatology_predict,
     evaluate_results,
+    get_t_stats,
+    harmonic_predict,
     load_and_split,
     make_config,
+    make_loaders,
+    model_spec,
     persistence_predict,
     run_rollouts,
 )
@@ -29,7 +33,7 @@ OUT = Path("results")
 
 MODELS = [
     "lstm", "gru", "rnn", "pint-lstm", "pint-gru",
-    "patchtst", "vanilla_s4d", "climode", "physssm",
+    "patchtst", "vanilla_s4d", "physssm",
 ]
 
 ZONES = [
@@ -46,11 +50,17 @@ def _time(fn):
     return result, time.perf_counter() - t0
 
 
-def train_with_timing(cfg, name, loader_pair):
+def loss_fn(name):
+    from thermassm.losses import baseline_loss, composite_loss
+
+    return composite_loss if name == "physssm" else baseline_loss
+
+
+def train_with_timing(cfg, name, loader_pair, t_mean=0.0, t_std=1.0):
     train_loader, val_loader = loader_pair
     torch.manual_seed(cfg.train.seed)
     np.random.seed(cfg.train.seed)
-    model = build_model(cfg, name)
+    model = build_model(cfg, name, t_mean, t_std)
 
     def run():
         return train_model(model, train_loader, val_loader, loss_fn(name), cfg, ckpt_name=f"{name}.pt")
@@ -61,33 +71,23 @@ def train_with_timing(cfg, name, loader_pair):
     return model, best_val, n_params, per_epoch
 
 
-def loss_fn(name):
-    from thermassm.losses import baseline_loss, composite_loss
-
-    return composite_loss if name == "physssm" else baseline_loss
-
-
 def table1(cfg, epochs):
     cfg.train.epochs = epochs
     dates, t2m, features, tr, va, te = load_and_split(cfg)
     test_start = int(np.argmax(te))
     input_len = cfg.data.input_len
-
-    from torch.utils.data import DataLoader
-
-    from thermassm.data.dataset import ClimateDataset
-
-    def loader(mask, shuffle):
-        ds = ClimateDataset(dates[mask], t2m[mask], cfg.data.lat, cfg.data.lon, input_len)
-        return DataLoader(ds, batch_size=cfg.train.batch_size, shuffle=shuffle)
-
-    train_loader, val_loader = loader(tr, True), loader(va, False)
+    t_mean, t_std = get_t_stats(t2m, tr)
     data = (dates, t2m, features, tr, va, te)
 
     rows = []
     rollout_save = {}
     for name in MODELS:
-        model, best_val, n_params, per_epoch = train_with_timing(cfg, name, (train_loader, val_loader))
+        mode, predict_len, _ = model_spec(name, cfg)
+        train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len)
+        val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len)
+        model, best_val, n_params, per_epoch = train_with_timing(
+            cfg, name, (train_loader, val_loader), t_mean, t_std
+        )
         results = run_rollouts(cfg, model, name, data)
         met = evaluate_results(results)
         steps_per_sec = _inference_speed(cfg, model, name, data)
@@ -111,12 +111,18 @@ def table1(cfg, epochs):
     if rollout_save:
         np.savez(OUT / "rollouts_table1.npz", **rollout_save)
 
-    for name, pretty in [("climatology", "Climatology (30-yr Mean)"), ("persistence", "Persistence")]:
+    for name, pretty, fn in [
+        ("climatology", "Climatology (30-yr Mean)", None),
+        ("persistence", "Persistence", None),
+        ("harmonic", "Harmonic Regression (PINT)", None),
+    ]:
         row = {"category": "Baselines", "name": pretty, "rmse": {}, "params": 0, "per_epoch_s": 0.0}
         for horizon in cfg.data.horizons:
             true = t2m[test_start + input_len : test_start + input_len + horizon]
             if name == "climatology":
                 pred = climatology_predict(dates, t2m, tr, str(dates[test_start + input_len]), horizon)
+            elif name == "harmonic":
+                pred = harmonic_predict(dates, t2m, tr, str(dates[test_start + input_len]), horizon)
             else:
                 pred = persistence_predict(t2m[test_start + input_len - 1], horizon)
             met = evaluate_forecast(true, pred)
@@ -140,22 +146,20 @@ def table2(cfg, epochs):
                "train.device": cfg.train.device, "train.epochs": epochs}
         )
         dates, t2m, features, tr, va, te = load_and_split(zcfg)
-
-        from torch.utils.data import DataLoader
-
-        from thermassm.data.dataset import ClimateDataset
-
-        def loader(mask, shuffle):
-            ds = ClimateDataset(dates[mask], t2m[mask], lat, lon, cfg.data.input_len)
-            return DataLoader(ds, batch_size=cfg.train.batch_size, shuffle=shuffle)
-
+        t_mean, t_std = get_t_stats(t2m, tr)
         data = (dates, t2m, features, tr, va, te)
         zone_rmse = {}
         for name in ["pint-gru", "patchtst", "physssm"]:
+            mode, predict_len, _ = model_spec(name, zcfg)
             torch.manual_seed(cfg.train.seed)
             np.random.seed(cfg.train.seed)
-            model = build_model(zcfg, name)
-            train_model(model, loader(tr, True), loader(va, False), loss_fn(name), zcfg)
+            model = build_model(zcfg, name, t_mean, t_std)
+            train_model(
+                model,
+                make_loaders(zcfg, dates, t2m, features, tr, True, mode, predict_len),
+                make_loaders(zcfg, dates, t2m, features, va, False, mode, predict_len),
+                loss_fn(name), zcfg,
+            )
             results = run_rollouts(zcfg, model, name, data)
             met = evaluate_results(results)
             zone_rmse[name] = round(met[730]["rmse"], 3)
@@ -178,15 +182,6 @@ def table2(cfg, epochs):
 def table3(cfg, epochs):
     cfg.train.epochs = epochs
     dates, t2m, features, tr, va, te = load_and_split(cfg)
-
-    from torch.utils.data import DataLoader
-
-    from thermassm.data.dataset import ClimateDataset
-
-    def loader(mask, shuffle):
-        ds = ClimateDataset(dates[mask], t2m[mask], cfg.data.lat, cfg.data.lon, cfg.data.input_len)
-        return DataLoader(ds, batch_size=cfg.train.batch_size, shuffle=shuffle)
-
     data = (dates, t2m, features, tr, va, te)
     labels = {
         "a_full": ["(a) Full Model", "Stefan-Boltzmann EBM", "Re(A) <= -delta (Lyapunov)", "Decoupled (mu_phys + R_theta)"],
@@ -200,7 +195,12 @@ def table3(cfg, epochs):
         torch.manual_seed(cfg.train.seed)
         np.random.seed(cfg.train.seed)
         model = AblationPhysSSM(cfg, **kw)
-        train_model(model, loader(tr, True), loader(va, False), ablation_loss, cfg)
+        train_model(
+            model,
+            make_loaders(cfg, dates, t2m, features, tr, True),
+            make_loaders(cfg, dates, t2m, features, va, False),
+            ablation_loss, cfg,
+        )
         results = run_rollouts(cfg, model, f"ablation_{key}", data)
         met = evaluate_results(results)[730]
         rows.append({
@@ -222,7 +222,7 @@ def table4(cfg, epochs):
     data1 = json.loads((OUT / "benchmark_table1.json").read_text())
     rows = []
     for r in data1["rows"]:
-        if r["name"].startswith(("Climatology", "Persistence")):
+        if r["name"].startswith(("Climatology", "Persistence", "Harmonic")):
             continue
         rows.append({
             "model": r["name"],
@@ -243,11 +243,12 @@ def _inference_speed(cfg, model, name, data):
     horizon = 365
     dates, t2m, features, tr, va, te = data
     test_start = int(np.argmax(te))
+    mode, _, is_physssm = model_spec(name, cfg)
     t0 = time.perf_counter()
     rollout_sequence(
         model, dates[test_start:], t2m[test_start:], features[test_start:],
         cfg.data.input_len, horizon, cfg.data.lat, cfg.data.lon,
-        torch.device(cfg.train.device), is_physssm=(name == "physssm"),
+        torch.device(cfg.train.device), mode=mode, is_physssm=is_physssm,
     )
     elapsed = time.perf_counter() - t0
     return int(horizon / elapsed) if elapsed > 0 else 0
@@ -263,7 +264,7 @@ def _peak_vram():
 def _category(name):
     if name == "physssm":
         return "Proposed"
-    if name.startswith("pint") or name == "climode":
+    if name.startswith("pint"):
         return "Physics-Informed"
     return "Pure Data-Driven"
 
@@ -278,7 +279,6 @@ def _pretty_name(name):
         "pint-gru": "PINT-GRU",
         "patchtst": "PatchTST",
         "vanilla_s4d": "Vanilla S4D",
-        "climode": "ClimODE 1D",
     }
     return mapping.get(name, name)
 

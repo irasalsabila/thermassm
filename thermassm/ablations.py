@@ -21,8 +21,9 @@ class AblationPhysSSM(nn.Module):
 
         self.in_proj = nn.Linear(m.input_dim, m.d_model)
         self.ssm = S4D(
-            m.d_model, m.d_state, m.delta,
-            constrained=(stability == "constrained"),
+            m.d_model, m.d_state,
+            mode=("lyapunov" if stability == "constrained" else "unconstrained"),
+            init="s4d-lin", delta=m.delta,
         )
         self.res_head = nn.Sequential(
             nn.Linear(m.d_model, m.decoder_hidden),

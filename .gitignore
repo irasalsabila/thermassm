@@ -20,6 +20,8 @@ ENV/
 /data/
 /checkpoints/
 /results/
+/results1/
+/plans/
 *.nc
 *.zarr
 *.zip

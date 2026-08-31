@@ -6,7 +6,6 @@ from .baselines import (
     PINTModel,
     PatchTST,
     VanillaS4D,
-    ClimODE,
     build_baseline,
 )
 
@@ -18,6 +17,5 @@ __all__ = [
     "PINTModel",
     "PatchTST",
     "VanillaS4D",
-    "ClimODE",
     "build_baseline",
 ]

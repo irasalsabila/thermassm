@@ -13,6 +13,7 @@ from thermassm.experiment import (
     build_model,
     climatology_predict,
     evaluate_results,
+    get_t_stats,
     load_and_split,
     make_config,
     persistence_predict,
@@ -20,7 +21,7 @@ from thermassm.experiment import (
     save_json,
 )
 
-MODELS = ["physssm", "lstm", "gru", "rnn", "pint-lstm", "pint-gru", "patchtst", "vanilla_s4d", "climode"]
+MODELS = ["physssm", "lstm", "gru", "rnn", "pint-lstm", "pint-gru", "patchtst", "vanilla_s4d"]
 
 
 def main():
@@ -35,10 +36,11 @@ def main():
     dates, t2m, features, tr, va, te = load_and_split(cfg)
 
     test_start = int(np.argmax(te))
+    t_mean, t_std = get_t_stats(t2m, tr)
     report = {}
 
     for name in args.models:
-        model = build_model(cfg, name)
+        model = build_model(cfg, name, t_mean, t_std)
         ckpt = f"{cfg.train.checkpoint_dir}/{name}.pt"
         if Path(ckpt).exists():
             model.load_state_dict(torch.load(ckpt, map_location=device))

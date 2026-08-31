@@ -17,6 +17,44 @@
 - [x] Phase 2: Implement decoupled residual output head `y_pred(t) = μ_phys(t) + R_θ(h(t))`
 - [x] Phase 3: Run 365/730/1095-day iterative rollouts across all model variants
 
+## High Priority — Baseline Faithfulness Revision (current focus)
+
+Revise baselines to match their papers exactly, in order: **S4D → PINT → PatchTST**.
+(ClimODE is a global spatiotemporal model — deferred, see cross-cutting note.)
+
+### S4D (first) — see plans/vanillas4d.md
+
+- [x] S4D: HiPPO-based `A` init — S4D-Lin `A_n = -1/2 + iπn`, S4D-Inv, S4D-LegS
+- [x] S4D: `B` init = ones; `C` init = complex standard normal `N(0,1) + iN(0,1)`
+- [x] S4D: `Δ` sampled geometric-uniform in log-space `[log Δ_min, log Δ_max]`
+- [~] S4D: `N/2` complex conjugate pairs with `2·Re(K)` real output (via `y.real`, equivalent)
+- [x] S4D: GLU activation + residual/norm blocks in the baseline stack
+- [x] S4D: "vanilla S4D" uses paper's `A = -exp(a_re)` (Hurwitz) parameterization with HiPPO init
+
+### PINT (second) — see plans/pint.md
+
+- [x] PINT: 2 hidden layers, 64 units, tanh, dropout 0.1
+- [x] PINT: 30-day block prediction (not 1-day next-step), autoregressive 30-day blocks
+- [x] PINT: standardize data (zero-mean, unit-variance, per-station train stats)
+- [x] PINT: fixed `ω = 2π/365` (not learnable)
+- [x] PINT: `λ_data = 1.0`, `λ_physics = 0.001`
+- [~] PINT: Adam, lr `1e-3` (1000 epochs / full batch set via CLI, not default)
+- [x] PINT: analytic sine/cosine linear-regression baseline `β₁cos(ωt) + β₂sin(ωt)`
+
+### PatchTST (third) — see plans/patchtst.md
+
+- [x] PatchTST: instance normalization + output denormalization
+- [x] PatchTST: pad with repeated last value (not zeros)
+- [x] PatchTST: learnable positional embedding `W_pos ∈ R^(D×N)`
+- [x] PatchTST: 3 layers, 16 heads, D=128, FFN 256, GELU, BatchNorm, dropout 0.2
+- [~] PatchTST: direct multi-step head (flatten → Linear → T) — block-direct `T=96` for long horizons
+- [x] PatchTST: block-direct rollout protocol (predict `T=96`, slide, repeat)
+
+### Cross-cutting
+
+- [x] Benchmark protocol: aligned per baseline (PINT 30-day blocks, PatchTST block-direct, PhysSSM 1-day recurrent); rollout recomputes DOY/insolation correctly
+- [x] ClimODE: removed from benchmark (was a toy Neural ODE, not the global ClimODE) — deferred for global/regional experiment
+
 ## Medium Priority
 
 - [x] Phase 1: Implement Vanilla S4D and Mamba baselines
@@ -39,3 +77,9 @@
 - [x] Phase 4: Generate Figure 6 — Eigenvalue Complex Plane Distribution
 - [x] Phase 4: Compile manuscript (ICLR/NeurIPS format)
 - [x] Phase 4: Publish clean GitHub repository with reproducible scripts
+
+## Future Work (post-benchmark)
+
+- [ ] FW-2: Multivariate forecasting — add humidity, precipitation, wind speed as co-forecast variables
+- [ ] FW-3: Adaptive physics loss — learnable/annealed `λ_ebm` (and `λ_smooth`) instead of fixed scalars
+- [ ] FW-5: Uncertainty quantification — probabilistic residual head (mean + variance) or ensemble rollouts, calibrated exceedance probabilities

@@ -51,16 +51,26 @@ class ClimateDataset(Dataset):
         lat: float,
         lon: float,
         input_len: int,
+        mode: str = "next",
+        predict_len: int = 1,
     ):
         self.input_len = input_len
+        self.mode = mode
+        self.predict_len = predict_len
         self.features = build_features(dates, t2m, lat, lon)
-        self.targets = t2m[1:]
-        self.n = len(t2m) - input_len - 1
+        self.t2m = t2m
+        if mode == "next":
+            self.n = len(t2m) - input_len - 1
+        else:
+            self.n = len(t2m) - input_len - predict_len
 
     def __len__(self) -> int:
         return self.n
 
     def __getitem__(self, idx: int):
         x = self.features[idx : idx + self.input_len]
-        y = self.targets[idx : idx + self.input_len]
+        if self.mode == "next":
+            y = self.t2m[idx + 1 : idx + 1 + self.input_len]
+        else:
+            y = self.t2m[idx + self.input_len : idx + self.input_len + self.predict_len]
         return torch.from_numpy(x), torch.from_numpy(y)
