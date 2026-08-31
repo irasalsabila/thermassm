@@ -83,16 +83,16 @@ def table1(cfg, epochs):
     rows = []
     rollout_save = {}
     for name in tqdm(MODELS, desc="table1"):
-        mode, predict_len, _ = model_spec(name, cfg)
-        train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len)
-        val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len)
+        mode, predict_len, _, lookback = model_spec(name, cfg)
+        train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len, lookback)
+        val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len, lookback)
         model, best_val, n_params, per_epoch = train_with_timing(
             cfg, name, (train_loader, val_loader), t_mean, t_std
         )
         results = run_rollouts(cfg, model, name, data)
         met = evaluate_results(results)
         steps_per_sec = _inference_speed(cfg, model, name, data)
-        if name in ("physssm", "pint-lstm", "patchtst"):
+        if name in ("physssm", "pint-lstm"):
             rollout_save[f"pred_730_{name}"] = results[730]["pred"]
             rollout_save.setdefault("true_730", results[730]["true"])
         rows.append({
@@ -101,6 +101,7 @@ def table1(cfg, epochs):
             "rmse": {str(h): round(met[h]["rmse"], 3) for h in cfg.data.horizons},
             "drift_730": round(met[730]["drift"], 3),
             "psd_730": round(met[730]["psd"], 3),
+            "corr_730": round(met[730]["corr"], 3),
             "params": n_params,
             "per_epoch_s": round(per_epoch, 2),
             "steps_per_sec": steps_per_sec,
@@ -131,6 +132,7 @@ def table1(cfg, epochs):
             if horizon == 730:
                 row["drift_730"] = round(met["drift"], 3)
                 row["psd_730"] = round(met["psd"], 3)
+                row["corr_730"] = round(met["corr"], 3)
         rows.append(row)
 
     out = {"meta": _meta(cfg), "rows": rows}
@@ -151,14 +153,14 @@ def table2(cfg, epochs):
         data = (dates, t2m, features, tr, va, te)
         zone_rmse = {}
         for name in ["pint-gru", "patchtst", "physssm"]:
-            mode, predict_len, _ = model_spec(name, zcfg)
+            mode, predict_len, _, lookback = model_spec(name, zcfg)
             torch.manual_seed(cfg.train.seed)
             np.random.seed(cfg.train.seed)
             model = build_model(zcfg, name, t_mean, t_std)
             train_model(
                 model,
-                make_loaders(zcfg, dates, t2m, features, tr, True, mode, predict_len),
-                make_loaders(zcfg, dates, t2m, features, va, False, mode, predict_len),
+                make_loaders(zcfg, dates, t2m, features, tr, True, mode, predict_len, lookback),
+                make_loaders(zcfg, dates, t2m, features, va, False, mode, predict_len, lookback),
                 loss_fn(name), zcfg,
             )
             results = run_rollouts(zcfg, model, name, data)
@@ -244,11 +246,11 @@ def _inference_speed(cfg, model, name, data):
     horizon = 365
     dates, t2m, features, tr, va, te = data
     test_start = int(np.argmax(te))
-    mode, _, is_physssm = model_spec(name, cfg)
+    mode, _, is_physssm, lookback = model_spec(name, cfg)
     t0 = time.perf_counter()
     rollout_sequence(
         model, dates[test_start:], t2m[test_start:], features[test_start:],
-        cfg.data.input_len, horizon, cfg.data.lat, cfg.data.lon,
+        lookback, horizon, cfg.data.lat, cfg.data.lon,
         torch.device(cfg.train.device), mode=mode, is_physssm=is_physssm,
     )
     elapsed = time.perf_counter() - t0

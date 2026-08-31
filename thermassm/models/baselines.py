@@ -179,18 +179,43 @@ class PatchTST(nn.Module):
         return out * t_std.unsqueeze(-1) + t_mean.unsqueeze(-1)
 
 
-class VanillaS4D(nn.Module):
-    def __init__(self, input_dim: int, d_model: int = 64, d_state: int = 64):
+class S4DBlock(nn.Module):
+    def __init__(self, d_model: int, d_state: int, dropout: float = 0.0):
         super().__init__()
-        self.in_proj = nn.Linear(input_dim, d_model)
+        self.norm = nn.LayerNorm(d_model)
         self.ssm = S4D(d_model, d_state, mode="s4d", init="s4d-lin")
         self.glu = nn.Linear(d_model, 2 * d_model)
+        self.dropout = nn.Dropout(dropout)
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        h = self.ssm(self.norm(x))
+        g = self.glu(h)
+        h = g[..., : self.ssm.d_model] * torch.sigmoid(g[..., self.ssm.d_model :])
+        return x + self.dropout(h)
+
+
+class VanillaS4D(nn.Module):
+    def __init__(
+        self,
+        input_dim: int,
+        d_model: int = 64,
+        d_state: int = 64,
+        n_layers: int = 4,
+        dropout: float = 0.1,
+    ):
+        super().__init__()
+        self.in_proj = nn.Linear(input_dim, d_model)
+        self.blocks = nn.ModuleList(
+            [S4DBlock(d_model, d_state, dropout) for _ in range(n_layers)]
+        )
+        self.norm = nn.LayerNorm(d_model)
         self.head = nn.Linear(d_model, 1)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
-        h = self.ssm(self.in_proj(scale_features(x)))
-        g = self.glu(h)
-        h = g[..., : self.in_proj.out_features] * torch.sigmoid(g[..., self.in_proj.out_features :])
+        h = self.in_proj(scale_features(x))
+        for blk in self.blocks:
+            h = blk(h)
+        h = self.norm(h)
         return self.head(h).squeeze(-1)
 
 
@@ -234,5 +259,6 @@ def build_baseline(
             )
         return PatchTST(input_dim, input_len, horizon=horizon)
     if name == "vanilla_s4d":
-        return VanillaS4D(input_dim, d_model)
+        n_layers = cfg.model.s4d_layers if cfg is not None else 4
+        return VanillaS4D(input_dim, d_model, n_layers=n_layers)
     raise ValueError(f"Unknown baseline: {name}")

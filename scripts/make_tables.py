@@ -42,13 +42,13 @@ def _meta_note(data):
 
 def build_table1(data):
     headers = ["Model Category", "Model Name", "365-Day RMSE (K)", "730-Day RMSE (K)",
-               "1095-Day RMSE (K)", "Drift βdrift 730d (K/yr)", "Spectral Dist DPSD 730d"]
+               "1095-Day RMSE (K)", "Drift βdrift 730d (K/yr)", "Spectral Dist DPSD 730d", "Corr 730d"]
     rows = []
     for r in data["rows"]:
         rows.append([
             r["category"], r["name"],
             r["rmse"].get("365"), r["rmse"].get("730"), r["rmse"].get("1095"),
-            r.get("drift_730"), r.get("psd_730"),
+            r.get("drift_730"), r.get("psd_730"), r.get("corr_730"),
         ])
     return headers, rows
 

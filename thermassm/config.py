@@ -23,7 +23,7 @@ class ModelConfig:
     delta: float = 0.1
     dt_min: float = 0.001
     dt_max: float = 0.1
-    decoder_hidden: int = 128
+    decoder_hidden: int = 256
     num_layers: int = 2
     dropout: float = 0.1
     pint_block: int = 30
@@ -35,6 +35,8 @@ class ModelConfig:
     patch_ffn: int = 256
     patch_dropout: float = 0.2
     patch_horizon: int = 96
+    patch_lookback: int = 336
+    s4d_layers: int = 2
 
 
 @dataclass
@@ -61,6 +63,8 @@ class TrainConfig:
     lambda_smooth: float = 0.01
     lambda_physics: float = 0.001
     lambda_ebm_min: float = 0.01
+    lambda_freq: float = 0.1
+    freq_window: int = 30
     lr_ebm: float = 1e-4
     device: str = "cpu"
     checkpoint_dir: str = "checkpoints"

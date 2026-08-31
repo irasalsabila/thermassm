@@ -42,6 +42,14 @@ def spectral_distance(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     )
 
 
+def corr(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_pred = np.asarray(y_pred, dtype=np.float64)
+    if y_true.std() == 0 or y_pred.std() == 0:
+        return 0.0
+    return float(np.corrcoef(y_true, y_pred)[0, 1])
+
+
 def csi_threshold(y_true: np.ndarray, y_pred: np.ndarray, q: float = 0.95) -> float:
     thr = np.quantile(y_true, q)
     hits = np.sum((y_true > thr) & (y_pred > thr))
@@ -58,4 +66,5 @@ def evaluate_forecast(y_true: np.ndarray, y_pred: np.ndarray) -> dict:
         "drift": secular_drift(y_true, y_pred),
         "psd": spectral_distance(y_true, y_pred),
         "csi95": csi_threshold(y_true, y_pred),
+        "corr": corr(y_true, y_pred),
     }

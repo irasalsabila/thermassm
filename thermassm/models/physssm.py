@@ -29,6 +29,8 @@ class PhysSSM(nn.Module):
         self.res_head = nn.Sequential(
             nn.Linear(m.d_model, m.decoder_hidden),
             nn.GELU(),
+            nn.Linear(m.decoder_hidden, m.decoder_hidden),
+            nn.GELU(),
             nn.Linear(m.decoder_hidden, 1),
         )
         self.ebm = EBM(cfg.physics)

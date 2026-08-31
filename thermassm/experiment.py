@@ -44,12 +44,12 @@ def load_and_split(cfg):
 
 def model_spec(name: str, cfg):
     if name == "physssm":
-        return "next", 1, True
+        return "next", 1, True, cfg.data.input_len
     if name.startswith("pint"):
-        return "block", cfg.model.pint_block, False
+        return "block", cfg.model.pint_block, False, cfg.data.input_len
     if name == "patchtst":
-        return "block", cfg.model.patch_horizon, False
-    return "next", 1, False
+        return "block", cfg.model.patch_horizon, False, cfg.model.patch_lookback
+    return "next", 1, False, cfg.data.input_len
 
 
 def get_t_stats(t2m: np.ndarray, mask: np.ndarray) -> tuple:
@@ -58,11 +58,13 @@ def get_t_stats(t2m: np.ndarray, mask: np.ndarray) -> tuple:
     return mean, std
 
 
-def make_loaders(cfg, dates, t2m, features, mask, shuffle, mode="next", predict_len=1):
+def make_loaders(cfg, dates, t2m, features, mask, shuffle, mode="next", predict_len=1, lookback=None):
+    if lookback is None:
+        lookback = cfg.data.input_len
     sub_dates = dates[mask]
     sub_t2m = t2m[mask]
     ds = ClimateDataset(
-        sub_dates, sub_t2m, cfg.data.lat, cfg.data.lon, cfg.data.input_len,
+        sub_dates, sub_t2m, cfg.data.lat, cfg.data.lon, lookback,
         mode=mode, predict_len=predict_len,
     )
     return DataLoader(ds, batch_size=cfg.train.batch_size, shuffle=shuffle)
@@ -71,10 +73,11 @@ def make_loaders(cfg, dates, t2m, features, mask, shuffle, mode="next", predict_
 def build_model(cfg, name: str, t_mean: float = 0.0, t_std: float = 1.0):
     if name == "physssm":
         return PhysSSM(cfg)
+    _, _, _, lookback = model_spec(name, cfg)
     return build_baseline(
         name, cfg.model.input_dim, cfg.model.d_model,
-        input_len=cfg.data.input_len,
-        horizon=cfg.data.horizons[-1],
+        input_len=lookback,
+        horizon=cfg.model.patch_horizon,
         t_mean=t_mean, t_std=t_std, cfg=cfg,
     )
 
@@ -89,9 +92,9 @@ def run_training(cfg, name: str):
     Path(cfg.train.checkpoint_dir).mkdir(parents=True, exist_ok=True)
     dates, t2m, features, tr, va, te = load_and_split(cfg)
     t_mean, t_std = get_t_stats(t2m, tr)
-    mode, predict_len, _ = model_spec(name, cfg)
-    train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len)
-    val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len)
+    mode, predict_len, _, lookback = model_spec(name, cfg)
+    train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len, lookback)
+    val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len, lookback)
     model = build_model(cfg, name, t_mean, t_std)
     history, best_val = train_model(
         model, train_loader, val_loader, _loss_fn(name), cfg
@@ -144,17 +147,16 @@ def run_rollouts(cfg, model, name, data):
     dates, t2m, features, tr, va, te = data
     device = torch.device(cfg.train.device)
     test_start_idx = np.argmax(te)
-    input_len = cfg.data.input_len
-    mode, _, is_physssm = model_spec(name, cfg)
+    mode, _, is_physssm, lookback = model_spec(name, cfg)
     results = {}
     for horizon in cfg.data.horizons:
         preds = rollout_sequence(
             model, dates[test_start_idx:], t2m[test_start_idx:],
-            features[test_start_idx:], input_len, horizon,
+            features[test_start_idx:], lookback, horizon,
             cfg.data.lat, cfg.data.lon, device,
             mode=mode, is_physssm=is_physssm,
         )
-        true = t2m[test_start_idx + input_len : test_start_idx + input_len + horizon]
+        true = t2m[test_start_idx + lookback : test_start_idx + lookback + horizon]
         results[horizon] = {"pred": preds, "true": true}
     return results
 
