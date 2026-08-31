@@ -9,6 +9,9 @@ import torch
 from .data.insolation import daily_insolation
 from .models.physssm import PhysSSM
 
+TEMP_MIN = 150.0
+TEMP_MAX = 400.0
+
 
 def _to_dates(dates: np.ndarray) -> list:
     return list(dates.astype("datetime64[D]").tolist())
@@ -58,7 +61,7 @@ def rollout_physssm(
             feat = build_feature_vector(cur_t, n_ins, n_sin, n_cos, lat, lon)
             x_t = torch.tensor(feat, dtype=torch.float32, device=device).unsqueeze(0)
             y, state = model.step(x_t, state)
-            pred = float(y.cpu().numpy())
+            pred = float(np.clip(y.cpu().numpy(), TEMP_MIN, TEMP_MAX))
             preds.append(pred)
             history.append(pred)
             dates.append(next_date)
@@ -79,7 +82,7 @@ def rollout_autoregressive(
         for _ in range(horizon):
             x_t = torch.tensor(x, dtype=torch.float32, device=device).unsqueeze(0)
             y = model(x_t)
-            pred = float(y[0, -1].cpu().numpy())
+            pred = float(np.clip(y[0, -1].cpu().numpy(), TEMP_MIN, TEMP_MAX))
             preds.append(pred)
             next_feat = x[-1].copy()
             next_feat[0] = pred

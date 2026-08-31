@@ -6,29 +6,40 @@ from scipy import stats
 
 
 def rmse(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    return float(np.sqrt(np.mean((y_true - y_pred) ** 2)))
+    err = np.asarray(y_true, dtype=np.float64) - np.asarray(y_pred, dtype=np.float64)
+    return float(np.sqrt(np.mean(err ** 2)))
 
 
 def mae(y_true: np.ndarray, y_pred: np.ndarray) -> float:
-    return float(np.mean(np.abs(y_true - y_pred)))
+    err = np.asarray(y_true, dtype=np.float64) - np.asarray(y_pred, dtype=np.float64)
+    return float(np.mean(np.abs(err)))
 
 
 def secular_drift(y_true: np.ndarray, y_pred: np.ndarray, per_year: bool = True) -> float:
-    err = y_pred - y_true
+    err = np.asarray(y_pred, dtype=np.float64) - np.asarray(y_true, dtype=np.float64)
     t = np.arange(len(err))
     slope = stats.linregress(t, err).slope
     return slope * 365.0 if per_year else slope
 
 
 def spectral_distance(y_true: np.ndarray, y_pred: np.ndarray) -> float:
+    y_true = np.asarray(y_true, dtype=np.float64)
+    y_pred = np.asarray(y_pred, dtype=np.float64)
+    if not (np.all(np.isfinite(y_true)) and np.all(np.isfinite(y_pred))):
+        return float("nan")
+
     def norm_psd(x):
-        psd = np.abs(np.fft.rfft(x)) ** 2
-        psd = psd / (psd.sum() + 1e-12)
-        return psd
+        psd = np.abs(np.fft.rfft(x - x.mean())) ** 2
+        psd = psd + 1e-12
+        return psd / psd.sum()
 
     p1 = norm_psd(y_true)
     p2 = norm_psd(y_pred)
-    return float(stats.wasserstein_distance(np.arange(len(p1)), np.arange(len(p2)), p1, p2))
+    return float(
+        stats.wasserstein_distance(
+            np.arange(len(p1)), np.arange(len(p2)), p1, p2
+        )
+    )
 
 
 def csi_threshold(y_true: np.ndarray, y_pred: np.ndarray, q: float = 0.95) -> float:
