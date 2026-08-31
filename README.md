@@ -42,7 +42,7 @@ python3 scripts/figures.py --synthetic --device cpu
 
 ## Full benchmark (actual results → tables)
 
-Run the four stages (or `--all`), then build the tables from the results:
+Run the four stages (or `--stage all`), then build the tables from the results:
 
 ```bash
 # Synthetic data (no download needed)
@@ -53,7 +53,7 @@ python3 scripts/run_benchmark.py --stage table4 --synthetic --device cpu
 
 # Real ERA5 data
 python3 scripts/download_data.py                 # ~700 MB → data/weatherbench_data/
-python3 scripts/run_benchmark.py --all --device cuda --epochs 50
+python3 scripts/run_benchmark.py --stage all --device cuda --epochs 50
 
 # Generate markdown + CSV tables from actual results
 python3 scripts/make_tables.py
@@ -79,7 +79,7 @@ Example Slurm job:
 #SBATCH --gres=gpu:1 --time=04:00:00 --mem=16G
 module load python
 pip install -r requirements.txt
-python3 scripts/run_benchmark.py --all --device cuda --epochs 50
+python3 scripts/run_benchmark.py --stage all --device cuda --epochs 50
 python3 scripts/make_tables.py
 ```
 
