@@ -122,7 +122,7 @@ def climatology_predict(dates, t2m, train_mask, start_date, horizon):
     start = np.datetime64(start_date).astype("datetime64[D]").tolist()
     preds = []
     for i in range(horizon):
-        d = (start + timedelta(days=i)).timetuple().tm_yday
+        d = min((start + timedelta(days=i)).timetuple().tm_yday, 365)
         preds.append(climo[d - 1])
     return np.array(preds, dtype=np.float32)
 
@@ -132,7 +132,7 @@ def climatology_trend_predict(dates, t2m, train_mask, start_date, horizon):
     doy = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
     years = dates.astype("datetime64[Y]").astype(int) + 1970
     climo = doy_climatology(dates, t2m, train_mask)
-    train_doy = doy[train_mask]
+    train_doy = np.clip(doy[train_mask], 1, 365)
     train_years = years[train_mask]
     anomalies = t2m[train_mask] - climo[train_doy - 1]
     slope = float(np.polyfit(train_years, anomalies, 1)[0])
@@ -140,7 +140,8 @@ def climatology_trend_predict(dates, t2m, train_mask, start_date, horizon):
     preds = []
     for i in range(horizon):
         d = start + timedelta(days=i)
-        preds.append(climo[d.timetuple().tm_yday - 1] + slope * (d.year - start.year))
+        doy_i = min(d.timetuple().tm_yday, 365)
+        preds.append(climo[doy_i - 1] + slope * (d.year - start.year))
     return np.array(preds, dtype=np.float32)
 
 

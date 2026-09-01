@@ -32,6 +32,7 @@ TAUS = [4, 10, 30, 90, 365]
 
 def _clim_series(climo_365, dates, start_idx, horizon):
     doy = np.array([d.timetuple().tm_yday for d in dates[start_idx : start_idx + horizon].astype("datetime64[D]").tolist()])
+    doy = np.clip(doy, 1, 365)
     return climo_365[doy - 1]
 
 

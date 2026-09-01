@@ -76,6 +76,7 @@ def train_with_timing(cfg, name, loader_pair, t_mean=0.0, t_std=1.0):
 
 def _clim_window(climo_365, dates, start_idx, horizon):
     doy = np.array([d.timetuple().tm_yday for d in dates[start_idx : start_idx + horizon].astype("datetime64[D]").tolist()])
+    doy = np.clip(doy, 1, 365)
     return climo_365[doy - 1]
 
 
