@@ -56,7 +56,7 @@ class PhysSSM(nn.Module):
     def _doy_idx(self, x: torch.Tensor) -> torch.Tensor:
         doy = torch.atan2(x[..., 2], x[..., 3]) * (365.0 / (2 * math.pi))
         doy = doy % 365.0
-        return doy.round().long().clamp(0, 364)
+        return (doy.round().long() - 1).clamp(0, 364)
 
     def _forward_shared(self, x: torch.Tensor):
         doy_idx = self._doy_idx(x)
