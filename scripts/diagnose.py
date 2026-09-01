@@ -106,6 +106,8 @@ def main():
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--horizon", type=int, default=730)
     parser.add_argument("--recurrence-ablation", action="store_true")
+    parser.add_argument("--baselines", action="store_true")
+    parser.add_argument("--lambda-sweep", action="store_true")
     args = parser.parse_args()
 
     cfg = make_config(**{"data.use_synthetic": args.synthetic, "train.device": args.device, "train.epochs": args.epochs})
@@ -115,6 +117,12 @@ def main():
     climo_365 = doy_climatology(dates, t2m, tr)
     mode, predict_len, _, lookback = model_spec("physssm", cfg)
 
+    if args.baselines:
+        simple_baselines(dates, t2m, climo_365, tr, va)
+        return
+    if args.lambda_sweep:
+        run_lambda_sweep(cfg, dates, t2m, features, tr, va, te, device, climo_365)
+        return
     if args.recurrence_ablation:
         run_recurrence_ablation(cfg, dates, t2m, features, tr, va, te, device, climo_365)
         return
@@ -256,6 +264,56 @@ def run_recurrence_ablation(cfg, dates, t2m, features, tr, va, te, device, climo
         pred = rollout_recurrent(model, init_t2m, init_dates, 730, cfg.data.lat, cfg.data.lon, device)
         print(f"{label}: one-step={one_step:.2f}K  730d rmse={rmse(true, pred):.2f} "
               f"acc={acc(true, pred, c730):.3f} var_ratio={float(np.std(pred - c730) / (np.std(true - c730) + 1e-8)):.2f}")
+
+
+def simple_baselines(dates, t2m, climo_365, tr, va):
+    doy = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
+    clim = climo_365[np.clip(doy, 1, 365) - 1]
+    z = t2m - clim
+    va_idx = np.where(va)[0]
+    t = va_idx[:-1]
+    t1 = va_idx[1:]
+    print("== one-step difficulty baselines (val) ==")
+    print(f"temperature persistence : {rmse(t2m[t1], t2m[t]):.3f} K")
+    print(f"anomaly persistence     : {rmse(z[t1], z[t]):.3f} K")
+
+    z_tr = z[tr]
+    d_tr = doy[tr]
+    X = np.column_stack([z_tr[:-1], np.ones(len(z_tr) - 1)])
+    a, b = np.linalg.lstsq(X, z_tr[1:], rcond=None)[0]
+    z_ar = a * z[t] + b
+    print(f"AR(1)                   : {rmse(z[t1], z_ar):.3f} K")
+
+    Xs = np.column_stack([
+        z_tr[:-1],
+        np.sin(2 * np.pi * d_tr[:-1] / 365),
+        np.cos(2 * np.pi * d_tr[:-1] / 365),
+        np.ones(len(z_tr) - 1),
+    ])
+    c = np.linalg.lstsq(Xs, z_tr[1:], rcond=None)[0]
+    z_sar = c[0] * z[t] + c[1] * np.sin(2 * np.pi * doy[t] / 365) + c[2] * np.cos(2 * np.pi * doy[t] / 365) + c[3]
+    print(f"seasonal AR(1)          : {rmse(z[t1], z_sar):.3f} K")
+
+
+def run_lambda_sweep(cfg, dates, t2m, features, tr, va, te, device, climo_365):
+    mode, predict_len, _, lookback = model_spec("physssm", cfg)
+    train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len, lookback)
+    val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len, lookback)
+    print("== lambda_res sweep (one-step) ==")
+    for lam in [0.0, 0.001, 0.01, 0.1]:
+        cfg.train.lambda_ebm = lam
+        torch.manual_seed(cfg.train.seed)
+        np.random.seed(cfg.train.seed)
+        model = PhysSSM(cfg, climo_365).to(device)
+        train_model(model, train_loader, val_loader, composite_loss, cfg, ckpt_name=f"lam{lam}.pt", desc=f"lam={lam}")
+        model.eval()
+        tot, n = 0.0, 0
+        with torch.no_grad():
+            for xb, yb in val_loader:
+                yp = model(xb.to(device)).cpu().numpy()
+                tot += float(((yp - yb.numpy()) ** 2).sum())
+                n += yb.numel()
+        print(f"lambda_res={lam}: one-step={np.sqrt(tot / n):.2f} K")
 
 
 if __name__ == "__main__":
