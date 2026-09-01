@@ -30,7 +30,7 @@ def main():
     physssm = build_model(cfg, "physssm")
     ckpt = f"{cfg.train.checkpoint_dir}/physssm.pt"
     if Path(ckpt).exists():
-        physssm.load_state_dict(torch.load(ckpt, map_location=args.device))
+        physssm.load_state_dict(torch.load(ckpt, map_location=args.device), strict=False)
     figures.figure6_eigenvalues(physssm, str(OUT / "fig6_eigenvalues.png"))
 
     # Trajectory figures: prefer saved rollouts from run_benchmark, else rerun.

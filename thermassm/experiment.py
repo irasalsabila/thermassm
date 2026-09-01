@@ -114,7 +114,7 @@ def doy_climatology(dates, t2m, train_mask):
     doy = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
     train_doy = doy[train_mask]
     train_t2m = t2m[train_mask]
-    return np.array([train_t2m[train_doy == d].mean() for d in range(1, 367)])
+    return np.array([train_t2m[train_doy == d].mean() for d in range(1, 366)])
 
 
 def climatology_predict(dates, t2m, train_mask, start_date, horizon):
