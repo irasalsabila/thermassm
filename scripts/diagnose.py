@@ -22,7 +22,7 @@ from thermassm.experiment import (
 )
 from thermassm.losses import composite_loss
 from thermassm.metrics import acc, corr, rmse, secular_drift
-from thermassm.models.physssm import scale_features
+from thermassm.models.physssm import PhysSSM, scale_features
 from thermassm.rollout import TEMP_MAX, TEMP_MIN, build_feature_vector, rollout_recurrent
 from thermassm.train import train_model
 
@@ -105,6 +105,7 @@ def main():
     parser.add_argument("--device", default="cpu")
     parser.add_argument("--epochs", type=int, default=50)
     parser.add_argument("--horizon", type=int, default=730)
+    parser.add_argument("--recurrence-ablation", action="store_true")
     args = parser.parse_args()
 
     cfg = make_config(**{"data.use_synthetic": args.synthetic, "train.device": args.device, "train.epochs": args.epochs})
@@ -113,6 +114,10 @@ def main():
     t_mean, t_std = get_t_stats(t2m, tr)
     climo_365 = doy_climatology(dates, t2m, tr)
     mode, predict_len, _, lookback = model_spec("physssm", cfg)
+
+    if args.recurrence_ablation:
+        run_recurrence_ablation(cfg, dates, t2m, features, tr, va, te, device, climo_365)
+        return
 
     model = build_model(cfg, "physssm", t_mean, t_std)
     model.to(device)
@@ -171,8 +176,86 @@ def main():
     m = _metrics(true, pred_oracle, clim)
     print(f"oracle: rmse={m['rmse']:.2f} acc={m['acc']:.3f} drift={m['drift']:.2f} var_ratio={m['var_ratio']:.2f}")
 
+    print("\n== structural-range diagnostics ==")
+    doy_all = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
+    clim_all = climo_365[np.clip(doy_all, 1, 365) - 1]
+    z_all = t2m - clim_all
+    dz_all = np.diff(z_all)
+    qs = [0.1, 1, 5, 95, 99, 99.9]
+    print("|z| quantiles  :", {q: round(float(np.percentile(np.abs(z_all), q)), 2) for q in qs})
+    print("|dz| quantiles :", {q: round(float(np.percentile(np.abs(dz_all), q)), 2) for q in qs})
+
+    rho_d = float(model._rho().item())
+    amp_d = float(model.res_amp.item())
+    if model.formulation == "innovation":
+        Lb = rho_d * z_all[:-1] - amp_d
+        Ub = rho_d * z_all[:-1] + amp_d
+    else:
+        Lb = rho_d * z_all[:-1] - (1 - rho_d) * amp_d
+        Ub = rho_d * z_all[:-1] + (1 - rho_d) * amp_d
+    z_next_all = z_all[1:]
+    e_min = np.clip(z_next_all - Ub, 0, None) + np.clip(Lb - z_next_all, 0, None)
+    print(f"structural RMSE floor (rho={rho_d:.3f}, amp={amp_d:.1f}, {model.formulation}): "
+          f"{float(np.sqrt(np.mean(e_min ** 2))):.3f} K")
+
+    model.eval()
+    sat, nsat = 0, 0
+    with torch.no_grad():
+        for xb, _ in val_loader:
+            xb = xb.to(device)
+            xs = scale_features(xb)
+            u = model.in_proj(xs)
+            h = torch.cat([model.ssm_fast(u), model.ssm_slow(u)], dim=-1)
+            zz = xb[:, :, 0] - model.climo[model._doy_idx(xb)]
+            ri = torch.cat([h, zz.unsqueeze(-1), xs[..., 1:2], xs[..., 2:4]], dim=-1)
+            tanh_out = torch.tanh(model.res_head(ri))
+            sat += int((tanh_out.abs() > 0.95).sum())
+            nsat += tanh_out.numel()
+    print(f"residual saturation P(|tanh|>0.95): {sat / max(1, nsat):.3f}")
+
     print("\n== leakage audit ==")
     leakage_audit(model, init_t2m, init_dates, horizon, cfg.data.lat, cfg.data.lon, device)
+
+
+def run_recurrence_ablation(cfg, dates, t2m, features, tr, va, te, device, climo_365):
+    mode, predict_len, _, lookback = model_spec("physssm", cfg)
+    train_loader = make_loaders(cfg, dates, t2m, features, tr, True, mode, predict_len, lookback)
+    val_loader = make_loaders(cfg, dates, t2m, features, va, False, mode, predict_len, lookback)
+    doy = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
+    clim = climo_365[np.clip(doy, 1, 365) - 1]
+    z = t2m - clim
+    U = float(np.percentile(np.abs(np.diff(z[tr])), 99))
+    print(f"innovation U = q99(|dz|, train) = {U:.2f} K\n")
+
+    configs = [
+        ("C0_equilibrium_amp5", "equilibrium", 5.0),
+        ("C1_equilibrium_amp20", "equilibrium", 20.0),
+        ("C2_innovation_ampU", "innovation", U),
+    ]
+    test_start = int(np.argmax(te))
+    ilen = cfg.data.input_len
+    init_t2m = t2m[test_start : test_start + ilen]
+    init_dates = dates[test_start : test_start + ilen]
+    true = t2m[test_start + ilen : test_start + ilen + 730]
+    d730 = np.array([d.timetuple().tm_yday for d in dates[test_start + ilen : test_start + ilen + 730].astype("datetime64[D]").tolist()])
+    c730 = climo_365[np.clip(d730, 1, 365) - 1]
+
+    for label, formulation, amp in configs:
+        torch.manual_seed(cfg.train.seed)
+        np.random.seed(cfg.train.seed)
+        model = PhysSSM(cfg, climo_365, formulation=formulation, amp=amp).to(device)
+        train_model(model, train_loader, val_loader, composite_loss, cfg, ckpt_name=f"{label}.pt", desc=label)
+        model.eval()
+        tot, n = 0.0, 0
+        with torch.no_grad():
+            for xb, yb in val_loader:
+                yp = model(xb.to(device)).cpu().numpy()
+                tot += float(((yp - yb.numpy()) ** 2).sum())
+                n += yb.numel()
+        one_step = np.sqrt(tot / n)
+        pred = rollout_recurrent(model, init_t2m, init_dates, 730, cfg.data.lat, cfg.data.lon, device)
+        print(f"{label}: one-step={one_step:.2f}K  730d rmse={rmse(true, pred):.2f} "
+              f"acc={acc(true, pred, c730):.3f} var_ratio={float(np.std(pred - c730) / (np.std(true - c730) + 1e-8)):.2f}")
 
 
 if __name__ == "__main__":

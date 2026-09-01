@@ -23,10 +23,11 @@ def scale_features(x: torch.Tensor) -> torch.Tensor:
 class PhysSSM(nn.Module):
     """Final proposed model: multiscale stable SSM + dissipative anomaly dynamics + bounded contextual residual."""
 
-    def __init__(self, cfg, climo_365):
+    def __init__(self, cfg, climo_365, formulation="equilibrium", amp=5.0):
         super().__init__()
         m = cfg.model
         self.cfg = cfg
+        self.formulation = formulation
         self.register_buffer("climo", torch.tensor(climo_365, dtype=torch.float32))
 
         half_state = max(1, m.d_state // 2)
@@ -46,7 +47,7 @@ class PhysSSM(nn.Module):
             nn.GELU(),
             nn.Linear(m.decoder_hidden, 1),
         )
-        self.res_amp = nn.Parameter(torch.tensor(5.0))
+        self.res_amp = nn.Parameter(torch.tensor(amp))
         self.log_tau = nn.Parameter(torch.tensor(math.log(30.0)))
 
     def _rho(self) -> torch.Tensor:
@@ -68,12 +69,16 @@ class PhysSSM(nn.Module):
         h_slow = self.ssm_slow(u)
         h = torch.cat([h_fast, h_slow], dim=-1)
         res_in = torch.cat([h, z.unsqueeze(-1), xs[..., 1:2], xs[..., 2:4]], dim=-1)
-        res = self.res_amp * torch.tanh(self.res_head(res_in).squeeze(-1))
+        tanh_out = torch.tanh(self.res_head(res_in).squeeze(-1))
         rho = self._rho()
-        z_next = rho * z + (1.0 - rho) * res
+        if self.formulation == "innovation":
+            res = self.res_amp * tanh_out
+        else:
+            res = (1.0 - rho) * self.res_amp * tanh_out
+        z_next = rho * z + res
         mu = clim + rho * z
         y = clim + z_next
-        return y, mu, (1.0 - rho) * res
+        return y, mu, res
 
     def forward_full(self, x: torch.Tensor):
         return self._forward_shared(x)
@@ -93,9 +98,13 @@ class PhysSSM(nn.Module):
         us, state_slow = self.ssm_slow.step(u, state[1])
         h = torch.cat([uf, us], dim=-1)
         res_in = torch.cat([h, z.unsqueeze(-1), xs[:, 1:2], xs[:, 2:4]], dim=-1)
-        res = self.res_amp * torch.tanh(self.res_head(res_in).squeeze(-1))
+        tanh_out = torch.tanh(self.res_head(res_in).squeeze(-1))
         rho = self._rho()
-        z_next = rho * z + (1.0 - rho) * res
+        if self.formulation == "innovation":
+            res = self.res_amp * tanh_out
+        else:
+            res = (1.0 - rho) * self.res_amp * tanh_out
+        z_next = rho * z + res
         return clim + z_next, (state_fast, state_slow)
 
     def initial_state(self, batch_size: int, device: torch.device):
