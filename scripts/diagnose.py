@@ -108,6 +108,7 @@ def main():
     parser.add_argument("--recurrence-ablation", action="store_true")
     parser.add_argument("--baselines", action="store_true")
     parser.add_argument("--lambda-sweep", action="store_true")
+    parser.add_argument("--mlp-diagnostic", action="store_true")
     args = parser.parse_args()
 
     cfg = make_config(**{"data.use_synthetic": args.synthetic, "train.device": args.device, "train.epochs": args.epochs})
@@ -119,6 +120,9 @@ def main():
 
     if args.baselines:
         simple_baselines(dates, t2m, climo_365, tr, va)
+        return
+    if args.mlp_diagnostic:
+        run_mlp_diagnostic(cfg, dates, t2m, features, tr, va, device, climo_365)
         return
     if args.lambda_sweep:
         run_lambda_sweep(cfg, dates, t2m, features, tr, va, te, device, climo_365)
@@ -314,6 +318,45 @@ def run_lambda_sweep(cfg, dates, t2m, features, tr, va, te, device, climo_365):
                 tot += float(((yp - yb.numpy()) ** 2).sum())
                 n += yb.numel()
         print(f"lambda_res={lam}: one-step={np.sqrt(tot / n):.2f} K")
+
+
+def run_mlp_diagnostic(cfg, dates, t2m, features, tr, va, device, climo_365):
+    import torch.nn as nn
+    import torch.nn.functional as F
+
+    doy = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
+    clim = climo_365[np.clip(doy, 1, 365) - 1]
+    z = t2m - clim
+    Q = features[:, 1] / 340.0
+    dsin = np.sin(2 * np.pi * doy / 365)
+    dcos = np.cos(2 * np.pi * doy / 365)
+
+    def pairs(mask):
+        idx = np.where(mask)[0]
+        t = idx[:-1]
+        t1 = idx[1:]
+        return np.column_stack([z[t], Q[t], dsin[t], dcos[t]]), z[t1]
+
+    Xtr, ytr = pairs(tr)
+    Xva, yva = pairs(va)
+    print("== tiny MLP diagnostic (no SSM, no recurrence) ==")
+    for hidden in [(64, 64), (8,), (1,)]:
+        layers = [nn.Linear(4, hidden[0])]
+        for i in range(len(hidden) - 1):
+            layers += [nn.Tanh(), nn.Linear(hidden[i], hidden[i + 1])]
+        layers += [nn.Tanh(), nn.Linear(hidden[-1], 1)]
+        mlp = nn.Sequential(*layers).to(device)
+        opt = torch.optim.Adam(mlp.parameters(), lr=1e-3)
+        Xt = torch.tensor(Xtr, dtype=torch.float32, device=device)
+        yt = torch.tensor(ytr, dtype=torch.float32, device=device).unsqueeze(-1)
+        for _ in range(500):
+            opt.zero_grad()
+            F.mse_loss(mlp(Xt), yt).backward()
+            opt.step()
+        mlp.eval()
+        with torch.no_grad():
+            pred = mlp(torch.tensor(Xva, dtype=torch.float32, device=device)).cpu().numpy().ravel()
+        print(f"MLP(4->{'->'.join(map(str, hidden))}->1) one-step: {rmse(yva, pred):.3f} K")
 
 
 if __name__ == "__main__":
