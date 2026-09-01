@@ -14,7 +14,6 @@ from .data.dataset import ClimateDataset, build_features, load_series
 from .losses import baseline_loss, composite_loss
 from .metrics import evaluate_forecast
 from .models import PhysSSM, build_baseline
-from .models.physssm_v2 import PhysSSMv2
 from .train import train_model
 
 
@@ -79,7 +78,7 @@ def build_model(cfg, name: str, t_mean: float = 0.0, t_std: float = 1.0):
         climo = getattr(cfg, "_climo_365", None)
         if climo is None:
             climo = np.full(365, 273.15, dtype=np.float32)
-        return PhysSSMv2(cfg, climo)
+        return PhysSSM(cfg, climo)
     _, _, _, lookback = model_spec(name, cfg)
     return build_baseline(
         name, cfg.model.input_dim, cfg.model.d_model,
