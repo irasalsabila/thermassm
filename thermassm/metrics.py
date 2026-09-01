@@ -50,6 +50,11 @@ def corr(y_true: np.ndarray, y_pred: np.ndarray) -> float:
     return float(np.corrcoef(y_true, y_pred)[0, 1])
 
 
+def acc(y_true: np.ndarray, y_pred: np.ndarray, clim: np.ndarray) -> float:
+    """Anomaly correlation coefficient: corr of (pred - clim) vs (true - clim)."""
+    return corr(y_true - clim, y_pred - clim)
+
+
 def csi_threshold(y_true: np.ndarray, y_pred: np.ndarray, q: float = 0.95) -> float:
     thr = np.quantile(y_true, q)
     hits = np.sum((y_true > thr) & (y_pred > thr))

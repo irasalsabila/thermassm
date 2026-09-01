@@ -16,6 +16,8 @@ from thermassm.ablations import AblationPhysSSM, ABLATION_CONFIGS
 from thermassm.experiment import (
     build_model,
     climatology_predict,
+    climatology_trend_predict,
+    doy_climatology,
     evaluate_results,
     get_t_stats,
     harmonic_predict,
@@ -26,7 +28,7 @@ from thermassm.experiment import (
     persistence_predict,
     run_rollouts,
 )
-from thermassm.metrics import evaluate_forecast
+from thermassm.metrics import acc, evaluate_forecast
 from thermassm.train import train_model
 from thermassm.losses import ablation_loss
 
@@ -34,7 +36,7 @@ OUT = Path("results")
 
 MODELS = [
     "lstm", "gru", "rnn", "pint-lstm", "pint-gru",
-    "patchtst", "vanilla_s4d", "physssm",
+    "patchtst", "patchtst336", "vanilla_s4d", "physssm",
 ]
 
 ZONES = [
@@ -72,12 +74,18 @@ def train_with_timing(cfg, name, loader_pair, t_mean=0.0, t_std=1.0):
     return model, best_val, n_params, per_epoch
 
 
+def _clim_window(climo_365, dates, start_idx, horizon):
+    doy = np.array([d.timetuple().tm_yday for d in dates[start_idx : start_idx + horizon].astype("datetime64[D]").tolist()])
+    return climo_365[doy - 1]
+
+
 def table1(cfg, epochs):
     cfg.train.epochs = epochs
     dates, t2m, features, tr, va, te = load_and_split(cfg)
     test_start = int(np.argmax(te))
     input_len = cfg.data.input_len
     t_mean, t_std = get_t_stats(t2m, tr)
+    climo_365 = doy_climatology(dates, t2m, tr)
     data = (dates, t2m, features, tr, va, te)
 
     rows = []
@@ -92,6 +100,8 @@ def table1(cfg, epochs):
         results = run_rollouts(cfg, model, name, data)
         met = evaluate_results(results)
         steps_per_sec = _inference_speed(cfg, model, name, data)
+        clim_730 = _clim_window(climo_365, dates, test_start + lookback, 730)
+        acc_730 = acc(results[730]["true"], results[730]["pred"], clim_730)
         if name in ("physssm", "pint-lstm"):
             rollout_save[f"pred_730_{name}"] = results[730]["pred"]
             rollout_save.setdefault("true_730", results[730]["true"])
@@ -102,37 +112,44 @@ def table1(cfg, epochs):
             "drift_730": round(met[730]["drift"], 3),
             "psd_730": round(met[730]["psd"], 3),
             "corr_730": round(met[730]["corr"], 3),
+            "acc_730": round(acc_730, 3),
             "params": n_params,
             "per_epoch_s": round(per_epoch, 2),
             "steps_per_sec": steps_per_sec,
             "peak_vram": _peak_vram(),
             "val_loss": round(best_val, 4),
         })
-        print(f"table1 {name}: rmse={rows[-1]['rmse']} drift={rows[-1]['drift_730']}")
+        print(f"table1 {name}: rmse={rows[-1]['rmse']} drift={rows[-1]['drift_730']} acc={rows[-1]['acc_730']}")
 
     if rollout_save:
         np.savez(OUT / "rollouts_table1.npz", **rollout_save)
 
-    for name, pretty, fn in [
-        ("climatology", "Climatology (30-yr Mean)", None),
-        ("persistence", "Persistence", None),
-        ("harmonic", "Harmonic Regression (PINT)", None),
+    for name, pretty in [
+        ("climatology", "Climatology (30-yr Mean)"),
+        ("climatology_trend", "Climatology + Trend"),
+        ("persistence", "Persistence"),
+        ("harmonic", "Harmonic Regression (PINT)"),
     ]:
         row = {"category": "Baselines", "name": pretty, "rmse": {}, "params": 0, "per_epoch_s": 0.0}
         for horizon in cfg.data.horizons:
             true = t2m[test_start + input_len : test_start + input_len + horizon]
+            start_str = str(dates[test_start + input_len])
             if name == "climatology":
-                pred = climatology_predict(dates, t2m, tr, str(dates[test_start + input_len]), horizon)
+                pred = climatology_predict(dates, t2m, tr, start_str, horizon)
+            elif name == "climatology_trend":
+                pred = climatology_trend_predict(dates, t2m, tr, start_str, horizon)
             elif name == "harmonic":
-                pred = harmonic_predict(dates, t2m, tr, str(dates[test_start + input_len]), horizon)
+                pred = harmonic_predict(dates, t2m, tr, start_str, horizon)
             else:
                 pred = persistence_predict(t2m[test_start + input_len - 1], horizon)
             met = evaluate_forecast(true, pred)
             row["rmse"][str(horizon)] = round(met["rmse"], 3)
             if horizon == 730:
+                clim = _clim_window(climo_365, dates, test_start + input_len, horizon)
                 row["drift_730"] = round(met["drift"], 3)
                 row["psd_730"] = round(met["psd"], 3)
                 row["corr_730"] = round(met["corr"], 3)
+                row["acc_730"] = round(acc(true, pred, clim), 3)
         rows.append(row)
 
     out = {"meta": _meta(cfg), "rows": rows}
@@ -280,7 +297,8 @@ def _pretty_name(name):
         "rnn": "RNN (Vanilla)",
         "pint-lstm": "PINT-LSTM",
         "pint-gru": "PINT-GRU",
-        "patchtst": "PatchTST",
+        "patchtst": "PatchTST-90 (matched)",
+        "patchtst336": "PatchTST-336 (native)",
         "vanilla_s4d": "Vanilla S4D",
     }
     return mapping.get(name, name)

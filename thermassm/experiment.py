@@ -14,6 +14,7 @@ from .data.dataset import ClimateDataset, build_features, load_series
 from .losses import baseline_loss, composite_loss
 from .metrics import evaluate_forecast
 from .models import PhysSSM, build_baseline
+from .models.physssm_v2 import PhysSSMv2
 from .train import train_model
 
 
@@ -39,6 +40,7 @@ def load_and_split(cfg):
     tr = year_mask(dates, *cfg.data.train_years)
     va = year_mask(dates, *cfg.data.val_years)
     te = year_mask(dates, *cfg.data.test_years)
+    cfg._climo_365 = doy_climatology(dates, t2m, tr)
     return dates, t2m, features, tr, va, te
 
 
@@ -48,6 +50,8 @@ def model_spec(name: str, cfg):
     if name.startswith("pint"):
         return "block", cfg.model.pint_block, False, cfg.data.input_len
     if name == "patchtst":
+        return "block", cfg.model.patch_horizon, False, cfg.data.input_len
+    if name == "patchtst336":
         return "block", cfg.model.patch_horizon, False, cfg.model.patch_lookback
     return "next", 1, False, cfg.data.input_len
 
@@ -72,7 +76,10 @@ def make_loaders(cfg, dates, t2m, features, mask, shuffle, mode="next", predict_
 
 def build_model(cfg, name: str, t_mean: float = 0.0, t_std: float = 1.0):
     if name == "physssm":
-        return PhysSSM(cfg)
+        climo = getattr(cfg, "_climo_365", None)
+        if climo is None:
+            climo = np.full(365, 273.15, dtype=np.float32)
+        return PhysSSMv2(cfg, climo)
     _, _, _, lookback = model_spec(name, cfg)
     return build_baseline(
         name, cfg.model.input_dim, cfg.model.d_model,
@@ -104,16 +111,37 @@ def run_training(cfg, name: str):
     return model, history, best_val, (dates, t2m, features, tr, va, te)
 
 
-def climatology_predict(dates, t2m, train_mask, start_date, horizon):
+def doy_climatology(dates, t2m, train_mask):
     doy = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
     train_doy = doy[train_mask]
     train_t2m = t2m[train_mask]
-    climo = np.array([train_t2m[train_doy == d].mean() for d in range(1, 367)])
+    return np.array([train_t2m[train_doy == d].mean() for d in range(1, 367)])
+
+
+def climatology_predict(dates, t2m, train_mask, start_date, horizon):
+    climo = doy_climatology(dates, t2m, train_mask)
     start = np.datetime64(start_date).astype("datetime64[D]").tolist()
     preds = []
     for i in range(horizon):
         d = (start + timedelta(days=i)).timetuple().tm_yday
         preds.append(climo[d - 1])
+    return np.array(preds, dtype=np.float32)
+
+
+def climatology_trend_predict(dates, t2m, train_mask, start_date, horizon):
+    """Day-of-year climatology + a linear trend fitted on training anomalies."""
+    doy = np.array([d.timetuple().tm_yday for d in dates.astype("datetime64[D]").tolist()])
+    years = dates.astype("datetime64[Y]").astype(int) + 1970
+    climo = doy_climatology(dates, t2m, train_mask)
+    train_doy = doy[train_mask]
+    train_years = years[train_mask]
+    anomalies = t2m[train_mask] - climo[train_doy - 1]
+    slope = float(np.polyfit(train_years, anomalies, 1)[0])
+    start = np.datetime64(start_date).astype("datetime64[D]").tolist()
+    preds = []
+    for i in range(horizon):
+        d = start + timedelta(days=i)
+        preds.append(climo[d.timetuple().tm_yday - 1] + slope * (d.year - start.year))
     return np.array(preds, dtype=np.float32)
 
 

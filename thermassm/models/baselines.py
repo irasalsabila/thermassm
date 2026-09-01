@@ -244,7 +244,7 @@ def build_baseline(
             num_layers=cfg.model.num_layers if cfg is not None else 2,
             dropout=cfg.model.dropout if cfg is not None else 0.1,
         )
-    if name == "patchtst":
+    if name in ("patchtst", "patchtst336"):
         if cfg is not None:
             return PatchTST(
                 input_dim, input_len,
