@@ -76,7 +76,7 @@ def oracle_rollout(model, init_feats, init_dates, horizon, lat, lon, device, tru
             z_true = torch.tensor([[true_anom[i]]], dtype=torch.float32, device=device)
             res_in = torch.cat([h, z_true, xs[:, 1:2], xs[:, 2:4]], dim=-1)
             res = model.res_amp * torch.tanh(model.res_head(res_in).squeeze(-1))
-            rho = model._rho()
+            rho = float(model._rho().item())
             z_pred = cur_t - clim
             z_next = rho * z_pred + (1.0 - rho) * float(res.item())
             y = float(np.clip(clim + z_next, TEMP_MIN, TEMP_MAX))
