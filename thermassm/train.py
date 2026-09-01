@@ -39,13 +39,14 @@ def evaluate_epoch(model, loader, loss_fn, cfg, device):
 
 
 def _param_groups(model, cfg):
-    if not hasattr(model, "ebm"):
+    ebm = getattr(model, "ebm", None)
+    if ebm is None:
         return model.parameters()
-    ebm_ids = {id(p) for p in model.ebm.parameters()}
+    ebm_ids = {id(p) for p in ebm.parameters()}
     other = [p for p in model.parameters() if id(p) not in ebm_ids]
     return [
         {"params": other, "lr": cfg.train.lr},
-        {"params": list(model.ebm.parameters()), "lr": cfg.train.lr_ebm},
+        {"params": list(ebm.parameters()), "lr": cfg.train.lr_ebm},
     ]
 
 
@@ -76,8 +77,9 @@ def train_model(model, train_loader, val_loader, loss_fn, cfg, ckpt_name="best.p
         history["train"].append(train_loss)
         history["val"].append(val_loss)
         postfix = {"train": f"{train_loss:.4f}", "val": f"{val_loss:.4f}"}
-        if hasattr(model, "ebm"):
-            postfix.update(model.ebm.param_summary())
+        ebm = getattr(model, "ebm", None)
+        if ebm is not None:
+            postfix.update(ebm.param_summary())
         pbar.set_postfix(**postfix)
         if val_loss < best_val:
             best_val = val_loss

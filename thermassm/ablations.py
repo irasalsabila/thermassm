@@ -30,6 +30,7 @@ class AblationPhysSSM(nn.Module):
             nn.GELU(),
             nn.Linear(m.decoder_hidden, 1),
         )
+        self.res_amp = nn.Parameter(torch.tensor(10.0))
         if physics_formulation == "ebm":
             self.ebm = EBM(cfg.physics)
             self.sho_mean = None
@@ -54,11 +55,14 @@ class AblationPhysSSM(nn.Module):
             return self.sho_mean + self.sho_gain * (s - self.sho_ref)
         return torch.zeros_like(t_prev)
 
+    def _residual(self, h):
+        return self.res_amp * torch.tanh(self.res_head(h).squeeze(-1))
+
     def forward_full(self, x):
         t_prev = x[..., 0]
         s = x[..., 1]
         h = self.ssm(self.in_proj(self._scale(x)))
-        res = self.res_head(h).squeeze(-1)
+        res = self._residual(h)
         mu = self._phys_prior(t_prev, s)
         if self.head == "decoupled":
             y = mu + res
@@ -73,7 +77,7 @@ class AblationPhysSSM(nn.Module):
     def step(self, x_t, state):
         u = self.in_proj(self._scale(x_t.unsqueeze(1)).squeeze(1))
         ssm_out, state = self.ssm.step(u, state)
-        res = self.res_head(ssm_out).squeeze(-1)
+        res = self._residual(ssm_out)
         mu = self._phys_prior(x_t[:, 0], x_t[:, 1])
         if self.head == "decoupled":
             y = mu + res

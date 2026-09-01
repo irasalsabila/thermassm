@@ -33,17 +33,22 @@ class PhysSSM(nn.Module):
             nn.GELU(),
             nn.Linear(m.decoder_hidden, 1),
         )
+        self.res_amp = nn.Parameter(torch.tensor(10.0))
         self.ebm = EBM(cfg.physics)
 
     def _scale(self, x: torch.Tensor) -> torch.Tensor:
         return scale_features(x)
+
+    def _residual(self, h: torch.Tensor) -> torch.Tensor:
+        # Bounded decoder: tanh caps the residual, enabling closed-loop stability.
+        return self.res_amp * torch.tanh(self.res_head(h).squeeze(-1))
 
     def forward_full(self, x: torch.Tensor):
         # x: (B, L, input_dim) raw features [T, S, doy_sin, doy_cos, lat_norm, lon_norm]
         t_prev = x[..., 0]
         s = x[..., 1]
         h = self.ssm(self.in_proj(self._scale(x)))
-        res = self.res_head(h).squeeze(-1)
+        res = self._residual(h)
         mu = self.ebm.step(t_prev, s)
         y = mu + res
         return y, mu, res
@@ -56,7 +61,7 @@ class PhysSSM(nn.Module):
         # x_t: (B, input_dim), state: (B, d_model, d_state) complex
         u = self.in_proj(self._scale(x_t.unsqueeze(1)).squeeze(1))
         ssm_out, state = self.ssm.step(u, state)
-        res = self.res_head(ssm_out).squeeze(-1)
+        res = self._residual(ssm_out)
         mu = self.ebm.step(x_t[:, 0], x_t[:, 1])
         return mu + res, state
 

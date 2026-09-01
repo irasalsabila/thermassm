@@ -62,8 +62,8 @@ class TrainConfig:
     lambda_ebm: float = 0.1
     lambda_smooth: float = 0.01
     lambda_physics: float = 0.001
-    lambda_ebm_min: float = 0.01
-    lambda_freq: float = 0.1
+    lambda_ebm_min: float = -1.0
+    lambda_freq: float = 0.0
     freq_window: int = 30
     lr_ebm: float = 1e-4
     device: str = "cpu"
