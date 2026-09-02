@@ -8,7 +8,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from thermassm.experiment import make_config, run_training
 
-MODELS = ["physssm", "lstm", "gru", "rnn", "pint-lstm", "pint-gru", "patchtst", "vanilla_s4d", "climode"]
+MODELS = ["physssm", "lstm", "gru", "rnn", "pint-lstm", "pint-gru", "patchtst", "vanilla_s4d"]
 
 
 def main():

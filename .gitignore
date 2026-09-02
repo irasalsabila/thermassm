@@ -22,6 +22,8 @@ ENV/
 /results/
 /results1/
 /plans/
+/old/
+/tests/
 *.nc
 *.zarr
 *.zip

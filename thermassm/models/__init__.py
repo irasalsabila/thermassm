@@ -1,7 +1,6 @@
 from .s4d import S4D
-from .ebm import EBM
+from .anchor import ThermalAnchor
 from .physssm import PhysSSM
-from .physssm_sb import PhysSSM_SB
 from .baselines import (
     RNNBaseline,
     PINTModel,
@@ -12,9 +11,8 @@ from .baselines import (
 
 __all__ = [
     "S4D",
-    "EBM",
+    "ThermalAnchor",
     "PhysSSM",
-    "PhysSSM_SB",
     "RNNBaseline",
     "PINTModel",
     "PatchTST",

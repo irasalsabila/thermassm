@@ -1,4 +1,4 @@
-"""PyTorch dataset for supervised next-step forecasting."""
+"""PyTorch dataset for direct-block and next-step forecasting."""
 from __future__ import annotations
 
 import numpy as np
@@ -71,6 +71,13 @@ class ClimateDataset(Dataset):
         x = self.features[idx : idx + self.input_len]
         if self.mode == "next":
             y = self.t2m[idx + 1 : idx + 1 + self.input_len]
-        else:
+            return torch.from_numpy(x), torch.from_numpy(y)
+        if self.mode == "direct":
+            # deterministic future forcing only: [Q, sin(DOY), cos(DOY)]
+            forcing = self.features[
+                idx + self.input_len : idx + self.input_len + self.predict_len, 1:4
+            ]
             y = self.t2m[idx + self.input_len : idx + self.input_len + self.predict_len]
+            return torch.from_numpy(x), torch.from_numpy(forcing), torch.from_numpy(y)
+        y = self.t2m[idx + self.input_len : idx + self.input_len + self.predict_len]
         return torch.from_numpy(x), torch.from_numpy(y)

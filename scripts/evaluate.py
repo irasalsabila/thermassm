@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Evaluate trained models with multi-year rollouts and report metrics."""
+"""Evaluate trained models: direct 1/7/14/30-day block + 365/730-day rollout."""
 import argparse
 import sys
 from pathlib import Path
@@ -10,13 +10,16 @@ import numpy as np
 import torch
 
 from thermassm.experiment import (
+    _stats,
     build_model,
     climatology_predict,
+    evaluate_direct_block,
     evaluate_results,
-    get_t_stats,
+    harmonic_predict,
     load_and_split,
     make_config,
     persistence_predict,
+    run_direct_block,
     run_rollouts,
     save_json,
 )
@@ -34,33 +37,48 @@ def main():
     cfg = make_config(**{"data.use_synthetic": args.synthetic, "train.device": args.device})
     device = torch.device(args.device)
     dates, t2m, features, tr, va, te = load_and_split(cfg)
+    t_mean, t_std, q_mean, q_std, res_amp = _stats(cfg)
+    data = (dates, t2m, features, tr, va, te)
 
-    test_start = int(np.argmax(te))
-    t_mean, t_std = get_t_stats(t2m, tr)
     report = {}
-
     for name in args.models:
-        model = build_model(cfg, name, t_mean, t_std)
-        ckpt = f"{cfg.train.checkpoint_dir}/{name}.pt"
-        if Path(ckpt).exists():
+        model = build_model(cfg, name, t_mean, t_std, q_mean, q_std, res_amp)
+        ckpt = Path(cfg.train.checkpoint_dir) / f"{name}.pt"
+        if ckpt.exists():
             model.load_state_dict(torch.load(ckpt, map_location=device))
-        data = (dates, t2m, features, tr, va, te)
-        results = run_rollouts(cfg, model, name, data)
-        report[name] = evaluate_results(results)
+        model.to(device)
+        entry = {}
+        if name == "physssm":
+            pred, target, clim = run_direct_block(cfg, model, data)
+            entry["direct"] = evaluate_direct_block(pred, target, clim)
+        entry["long"] = evaluate_results(run_rollouts(cfg, model, name, data))
+        report[name] = entry
 
-    for horizon in cfg.data.horizons:
+    # Statistical baselines (long horizon only).
+    for horizon in (365, 730):
         input_len = cfg.data.input_len
+        test_start = int(np.argmax(te))
         true = t2m[test_start + input_len : test_start + input_len + horizon]
-        climo = climatology_predict(dates, t2m, tr, str(dates[test_start + input_len]), horizon)
+        start_str = str(dates[test_start + input_len])
+        climo = climatology_predict(dates, t2m, tr, start_str, horizon)
         persist = persistence_predict(t2m[test_start + input_len - 1], horizon)
-        report.setdefault("climatology", {})
-        report.setdefault("persistence", {})
-        report["climatology"][horizon] = {"rmse": float(np.sqrt(np.mean((true - climo) ** 2)))}
-        report["persistence"][horizon] = {"rmse": float(np.sqrt(np.mean((true - persist) ** 2)))}
+        harmonic = harmonic_predict(dates, t2m, tr, start_str, horizon)
+        report.setdefault("climatology", {})["long"] = report.get("climatology", {}).get("long", {})
+        report.setdefault("persistence", {})["long"] = report.get("persistence", {}).get("long", {})
+        report.setdefault("harmonic", {})["long"] = report.get("harmonic", {}).get("long", {})
+        report["climatology"]["long"][horizon] = {"rmse": float(np.sqrt(np.mean((true - climo) ** 2)))}
+        report["persistence"]["long"][horizon] = {"rmse": float(np.sqrt(np.mean((true - persist) ** 2)))}
+        report["harmonic"]["long"][horizon] = {"rmse": float(np.sqrt(np.mean((true - harmonic) ** 2)))}
 
     save_json(report, "results/metrics.json")
-    for name, horizons in report.items():
-        print(f"{name:>14s}: " + "  ".join(f"{h}d={m['rmse']:.2f}" for h, m in horizons.items()))
+
+    for name, entry in report.items():
+        if "direct" in entry:
+            leads = "  ".join(f"{k}d={m['rmse']:.2f}" for k, m in entry["direct"].items())
+        else:
+            leads = ""
+        long = "  ".join(f"{h}d={m['rmse']:.2f}" for h, m in entry["long"].items())
+        print(f"{name:>14s}: direct[{leads}]  long[{long}]")
 
 
 if __name__ == "__main__":

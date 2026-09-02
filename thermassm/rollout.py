@@ -1,4 +1,4 @@
-"""Autoregressive / direct rollout for long-horizon forecasting."""
+"""Rollout utilities: direct block inference for PhysSSM and baselines."""
 from __future__ import annotations
 
 from datetime import timedelta
@@ -49,28 +49,44 @@ def _next_feature(prev_feat: np.ndarray, prev_date, next_t: float, lat: float, l
     return feat, next_date
 
 
-def rollout_recurrent(model, init_t2m, init_dates, horizon, lat, lon, device):
-    """PhysSSM-style: 1-day recurrent step with carried state."""
+def _block_forcing(last_date, block_len: int, lat: float) -> np.ndarray:
+    """Deterministic future forcing [Q, sin(DOY), cos(DOY)] for a block."""
+    Q, s, c = [], [], []
+    d = last_date
+    for _ in range(block_len):
+        d = d + timedelta(days=1)
+        doy = _doy(d)
+        Q.append(float(daily_insolation(lat, np.array([doy], dtype=float))[0]))
+        s.append(float(np.sin(2 * np.pi * doy / 365.0)))
+        c.append(float(np.cos(2 * np.pi * doy / 365.0)))
+    return np.stack([Q, s, c], axis=-1).astype(np.float32)
+
+
+def rollout_block_physssm(model, init_x, init_dates, horizon, lat, lon, device):
+    """PhysSSM: direct 30-day block, append, retain rolling 90-day context."""
     model.eval()
+    block_len = getattr(model, "forecast_horizon", 30)
+    input_len = init_x.shape[0]
+    x = init_x.copy()
     dates = _to_dates(init_dates)
-    state = model.initial_state(1, device)
-    history = list(init_t2m)
     preds = []
     with torch.no_grad():
-        for _ in range(horizon):
-            cur_t = history[-1]
-            next_date = dates[-1] + timedelta(days=1)
-            n_doy = _doy(next_date)
-            n_ins = float(daily_insolation(lat, np.array([n_doy], dtype=float))[0])
-            n_sin = float(np.sin(2 * np.pi * n_doy / 365.0))
-            n_cos = float(np.cos(2 * np.pi * n_doy / 365.0))
-            feat = build_feature_vector(cur_t, n_ins, n_sin, n_cos, lat, lon)
-            x_t = torch.tensor(feat, dtype=torch.float32, device=device).unsqueeze(0)
-            y, state = model.step(x_t, state)
-            pred = float(np.clip(y.item(), TEMP_MIN, TEMP_MAX))
-            preds.append(pred)
-            history.append(pred)
-            dates.append(next_date)
+        while len(preds) < horizon:
+            forcing = _block_forcing(dates[-1], block_len, lat)
+            x_t = torch.tensor(x, dtype=torch.float32, device=device).unsqueeze(0)
+            f_t = torch.tensor(forcing, dtype=torch.float32, device=device).unsqueeze(0)
+            y = model(x_t, f_t)[0].cpu().numpy()
+            y = np.clip(y, TEMP_MIN, TEMP_MAX)
+            take = min(block_len, horizon - len(preds))
+            for i in range(take):
+                pred = float(y[i])
+                preds.append(pred)
+                next_date = dates[-1] + timedelta(days=1)
+                feat = build_feature_vector(
+                    pred, float(forcing[i, 0]), float(forcing[i, 1]), float(forcing[i, 2]), lat, lon
+                )
+                x = np.concatenate([x, feat[None, :]], axis=0)[-input_len:]
+                dates.append(next_date)
     return np.array(preds, dtype=np.float32)
 
 
@@ -140,8 +156,8 @@ def rollout_sequence(
     init_t2m = t2m[:input_len]
     init_dates = dates[:input_len]
     init_x = features[:input_len]
-    if is_physssm or hasattr(model, "step"):
-        return rollout_recurrent(model, init_t2m, init_dates, horizon, lat, lon, device)
+    if is_physssm:
+        return rollout_block_physssm(model, init_x, init_dates, horizon, lat, lon, device)
     if mode == "block":
         return rollout_block(model, init_x, init_dates, horizon, lat, lon, device)
     if mode == "direct":

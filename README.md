@@ -1,27 +1,37 @@
 # ThermaSSM
 
-Structurally Stable Energy-Balance State Space Models for Long-Horizon Temperature Modeling.
+**PhysSSM**: Physics-Anchored Stable State-Space Models for Long-Horizon Temperature Dynamics.
 
-See [`plans/prd.md`](plans/prd.md) for the full (revised) specification and [`plans/todo.md`](plans/todo.md) for the task list.
+PhysSSM decomposes daily temperature into a stable insolation-forced thermal anchor
+and a bounded S4D-learned residual, and forecasts in direct 90-day → 30-day blocks
+before recursive block rollout.
+
+See [`plans/prd.md`](plans/prd.md) for the full specification and [`plans/todo.md`](plans/todo.md)
+for the task list. Legacy Stefan-Boltzmann / fast-slow / anomaly-recurrence code is frozen in `old/`.
 
 ## Layout
 
 ```
 thermassm/            # Python package
-  config.py           # Physics / model / data / train config
+  config.py           # anchor / model / data / train config + site registry
   data/               # insolation, ERA5 download, synthetic gen, dataset
-  models/             # S4D, EBM prior, PhysSSM, baselines
-  losses.py           # composite + ablation losses
-  metrics.py          # RMSE, MAE, drift, PSD, CSI95
-  rollout.py          # autoregressive multi-year rollout
+  models/             # anchor, S4D, PhysSSM, baselines
+  losses.py           # MSE-only core loss (no physics penalties)
+  metrics.py          # RMSE, MAE, TAC, bias, drift, PSD, variance ratio, ...
+  rollout.py          # 30-day block-recursive inference
   train.py            # training loop
   experiment.py       # orchestration helpers
-  ablations.py        # ablation model + configs
+  ablations.py        # A0-A5 ablation variants
   figures.py          # paper figures
 scripts/              # entry-point CLI scripts
-plans/                # PRD + todo
+tests/                # unit tests (gitignored; kept locally)
+plans/                # PRD + todo (gitignored; kept locally)
+old/                  # frozen legacy code (gitignored; kept locally)
 results/              # generated metrics, tables, figures (gitignored)
 ```
+
+> `old/`, `tests/`, `plans/`, `results/`, `checkpoints/` and `data/` are gitignored and kept
+> only as local working artifacts (see `.gitignore`).
 
 ## Install
 
@@ -29,7 +39,8 @@ results/              # generated metrics, tables, figures (gitignored)
 pip install -r requirements.txt
 ```
 
-Core requirements: `torch`, `numpy`, `pandas`, `scipy`. For real ERA5 data you additionally need `xarray`, `netCDF4`, `zarr`, `gcsfs` (all in `requirements.txt`).
+Core requirements: `torch`, `numpy`, `pandas`, `scipy`. For real ERA5 data you additionally
+need `xarray`, `netCDF4`, `zarr`, `gcsfs` (all in `requirements.txt`).
 
 ## Quick start (synthetic data, offline smoke test)
 
@@ -42,7 +53,7 @@ python3 scripts/figures.py --synthetic --device cpu
 
 ## Full benchmark (actual results → tables)
 
-Run the four stages (or `--stage all`), then build the tables from the results:
+Run the stages (or `--stage all`), then build the tables:
 
 ```bash
 # Synthetic data (no download needed)
@@ -61,26 +72,13 @@ python3 scripts/make_tables.py
 
 Outputs land in `results/`:
 - `benchmark_table{1,2,3,4}.json` — raw computed metrics
-- `benchmark_tables.md` — all four tables (actual values)
+- `benchmark_tables.md` — all tables (actual values)
 - `table*_*.csv` — CSV copies
 
-> The tables in `plans/prd.md` are **illustrative layouts with `TBD`** — no fabricated numbers. Only `results/benchmark_tables.md` reflects actual computed values.
-
-## HPC / GPU notes
-
-- Use `--device cuda` on a GPU node. `run_benchmark.py --stage table4` reports peak VRAM only on CUDA (`N/A (CPU)` otherwise).
-- Increase `--epochs` (50–100) for converged numbers; 30 epochs is a smoke level.
-- Each stage writes its own JSON and can be run as a separate Slurm job; `make_tables.py` picks up whichever stages are present.
-
-Example Slurm job:
+## Unit tests
 
 ```bash
-#!/bin/bash
-#SBATCH --gres=gpu:1 --time=04:00:00 --mem=16G
-module load python
-pip install -r requirements.txt
-python3 scripts/run_benchmark.py --stage all --device cuda --epochs 50
-python3 scripts/make_tables.py
+python3 -m pytest tests/ -q
 ```
 
 ## Reproduce a single model
@@ -89,4 +87,4 @@ python3 scripts/make_tables.py
 python3 scripts/train.py --model <name> [--synthetic] [--device cuda] [--epochs 50]
 ```
 
-`<name>` ∈ `physssm`, `lstm`, `gru`, `rnn`, `pint-lstm`, `pint-gru`, `patchtst`, `vanilla_s4d`, `climode`.
+`<name>` ∈ `physssm`, `lstm`, `gru`, `rnn`, `pint-lstm`, `pint-gru`, `patchtst`, `vanilla_s4d`.

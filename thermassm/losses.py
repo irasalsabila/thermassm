@@ -1,49 +1,36 @@
-"""Loss functions for ThermaSSM."""
+"""Loss functions for PhysSSM.
+
+Core PhysSSM objective is MSE-only over the direct 30-day block. No physics
+residual / smoothness / frequency-separation penalties.
+"""
 from __future__ import annotations
 
 import torch
 import torch.nn.functional as F
 
 
-def _lowpass(x: torch.Tensor, window: int) -> torch.Tensor:
-    x = x.unsqueeze(1)
-    x = F.avg_pool1d(x, kernel_size=window, stride=1, padding=window // 2)
-    return x.squeeze(1)
+def physssm_loss(model, batch, cfg) -> torch.Tensor:
+    """MSE over the direct forecast block: x -> (Q_future, DOY_future) -> y."""
+    x, forcing, y = batch
+    pred = model(x, forcing)
+    return F.mse_loss(pred, y)
 
 
-def composite_loss(model, x: torch.Tensor, y_target: torch.Tensor, cfg) -> torch.Tensor:
-    y, mu, res = model.forward_full(x)
-    mse = F.mse_loss(y, y_target)
-    # Physics term = residual amplitude in K^2 (unit-consistent with MSE).
-    l_ebm = (res ** 2).mean()
-    # Smoothness on the macro branch only (never the residual).
-    d2 = mu[:, 2:] - 2 * mu[:, 1:-1] + mu[:, :-2]
-    l_smooth = (d2 ** 2).mean()
-    # Frequency separation: push residual energy to high frequencies so the EBM owns the seasonal mode.
-    l_freq = (_lowpass(res, cfg.train.freq_window) ** 2).mean()
-    return (
-        mse
-        + cfg.train.lambda_ebm * l_ebm
-        + cfg.train.lambda_smooth * l_smooth
-        + cfg.train.lambda_freq * l_freq
-    )
+def ablation_loss(model, batch, cfg) -> torch.Tensor:
+    """MSE for ablation variants; they share the same (x, forcing, y) interface."""
+    x, forcing, y = batch
+    pred = model(x, forcing)
+    return F.mse_loss(pred, y)
 
 
-def baseline_loss(model, x: torch.Tensor, y_target: torch.Tensor, cfg) -> torch.Tensor:
-    y = model(x)
+def baseline_loss(model, batch, cfg) -> torch.Tensor:
+    """MSE for baselines (no future forcing)."""
+    x, y = batch
+    pred = model(x)
     if hasattr(model, "t_mean") and hasattr(model, "t_std"):
-        y_target = (y_target - model.t_mean) / (model.t_std + 1e-8)
-    loss = F.mse_loss(y, y_target)
+        y = (y - model.t_mean) / (model.t_std + 1e-8)
+    loss = F.mse_loss(pred, y)
     if hasattr(model, "sho_loss"):
-        loss = loss + cfg.train.lambda_physics * model.sho_loss(y)
+        # PINT soft physics regularizer (baseline only, not the PhysSSM core).
+        loss = loss + cfg.train.lambda_physics * model.sho_loss(pred)
     return loss
-
-
-def ablation_loss(model, x: torch.Tensor, y_target: torch.Tensor, cfg) -> torch.Tensor:
-    y, mu, res = model.forward_full(x)
-    mse = F.mse_loss(y, y_target)
-    has_ebm = getattr(model, "physics_formulation", None) == "ebm" and model.ebm is not None
-    l_phys = (res ** 2).mean() if has_ebm else torch.zeros((), device=y.device)
-    d2 = mu[:, 2:] - 2 * mu[:, 1:-1] + mu[:, :-2]
-    l_smooth = (d2 ** 2).mean()
-    return mse + cfg.train.lambda_ebm * l_phys + cfg.train.lambda_smooth * l_smooth

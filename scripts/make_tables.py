@@ -20,6 +20,19 @@ def _fmt(c):
     return str(c)
 
 
+def _val(v):
+    """Render a metric value that may be a scalar or a {mean,std,n} summary."""
+    if isinstance(v, dict):
+        mean = v.get("mean")
+        std = v.get("std")
+        if mean is None:
+            return ""
+        return f"{mean:.2f}" + (f" ± {std:.2f}" if std else "")
+    if v is None:
+        return ""
+    return _fmt(v)
+
+
 def _md_table(headers, rows):
     lines = ["| " + " | ".join(headers) + " |", "|" + "|".join(["---"] * len(headers)) + "|"]
     for row in rows:
@@ -37,57 +50,62 @@ def _write_csv(name, headers, rows):
 
 def _meta_note(data):
     m = data.get("meta", {}) if data else {}
-    return f"data={m.get('data_source', '?')}, epochs={m.get('epochs', '?')}, device={m.get('device', '?')}"
+    seeds = m.get("seeds", [])
+    return f"data={m.get('data_source', '?')}, epochs={m.get('epochs', '?')}, device={m.get('device', '?')}, seeds={seeds}"
+
+
+def _get(row, *path, default=""):
+    cur = row
+    for p in path:
+        if not isinstance(cur, dict):
+            return default
+        cur = cur.get(p, default)
+    return cur
 
 
 def build_table1(data):
-    headers = ["Model Category", "Model Name", "365-Day RMSE (K)", "730-Day RMSE (K)",
-               "1095-Day RMSE (K)", "Drift βdrift 730d (K/yr)", "ACC 730d"]
+    headers = ["Model", "1d RMSE (K)", "7d RMSE (K)", "14d RMSE (K)", "30d RMSE (K)",
+               "30d TAC", "365d RMSE (K)", "730d RMSE (K)"]
     rows = []
     for r in data["rows"]:
+        direct = r.get("direct", {})
+        long = r.get("long", {})
         rows.append([
-            r["category"], r["name"],
-            r["rmse"].get("365"), r["rmse"].get("730"), r["rmse"].get("1095"),
-            r.get("drift_730"), r.get("acc_730"),
+            r["name"],
+            _val(_get(direct, "1", "rmse")), _val(_get(direct, "7", "rmse")),
+            _val(_get(direct, "14", "rmse")), _val(_get(direct, "30", "rmse")),
+            _val(_get(direct, "30", "tac")),
+            _val(_get(long, "365", "rmse")), _val(_get(long, "730", "rmse")),
         ])
     return headers, rows
 
 
 def build_table2(data):
-    headers = ["Climate Zone", "Coordinates", "PINT-GRU RMSE (730d)",
-               "PatchTST RMSE (730d)", "PhysSSM-EBM RMSE (730d)", "Δ Improvement"]
+    headers = ["Site", "Lat", "Lon", "PINT-GRU RMSE (730d)", "PhysSSM RMSE (730d)", "Improvement"]
     rows = []
     for r in data["rows"]:
-        rows.append([
-            r["zone"], r["coords"], r["pint_gru"], r["patchtst"], r["physssm"],
-            f"{r['improvement_pct']:+.1f}%",
-        ])
+        rows.append([r["site"], r["lat"], r["lon"], r["pint_gru"], r["physssm"],
+                     f"{r['improvement_pct']:+.1f}%"])
     return headers, rows
 
 
 def build_table3(data):
-    headers = ["Configuration", "Physics Formulation", "Stability Constraint (A)",
-               "Output Head", "730d RMSE (K)", "Drift (K/yr)", "Extreme CSI₉₅"]
+    headers = ["Variant", "Anchor", "Stable S4D", "Bounded", "30d RMSE (K)", "730d RMSE (K)",
+               "730d RMSE std", "Drift (K/yr)", "PSD Distance"]
     rows = []
     for r in data["rows"]:
-        rows.append([
-            r["config"], r["physics"], r["stability"], r["head"],
-            r["rmse_730"], r["drift"], r["csi95"],
-        ])
+        rows.append([r["config"], r["anchor"], r["stable"], r["bounded"],
+                     r["rmse_30"], r["rmse_730"], r.get("rmse_730_std", ""), r["drift"], r["psd"]])
     return headers, rows
 
 
 def build_table4(data):
-    headers = ["Model", "Parameters", "Training Time (50 Epochs)",
-               "Peak VRAM", "Inference Speed (Steps/sec)"]
+    headers = ["Model", "Parameters", "Train Time / Epoch (s)", "Peak VRAM", "Inference (steps/s)"]
     rows = []
     for r in data["rows"]:
-        params = f"{r['params']/1000:.0f} K"
-        rows.append([
-            r["model"], params,
-            f"{r['train_time_50ep_min']:.2f} min",
-            r["peak_vram"], f"{r['steps_per_sec']:,}",
-        ])
+        params = f"{r['params']/1000:.1f} K" if r.get("params") else "0"
+        rows.append([r["model"], params, r.get("train_time_per_epoch_s", ""),
+                     r.get("peak_vram", ""), f"{r.get('steps_per_sec', 0):,}"])
     return headers, rows
 
 
@@ -99,13 +117,13 @@ def main():
 
     sections = []
     if data1:
-        sections.append(("Table 1: Main Multi-Year Forecasting Benchmark (WeatherBench 2m-Temperature)", *build_table1(data1)))
+        sections.append(("Table 1: Short-to-Medium Forecast Skill", *build_table1(data1)))
     if data2:
-        sections.append(("Table 2: Multi-Climatic Zone Generalization", *build_table2(data2)))
+        sections.append(("Table 2: Cross-Site Long-Horizon (730-Day, 7 Sites)", *build_table2(data2)))
     if data3:
-        sections.append(("Table 3: Comprehensive Ablation Study (730-Day Rollout)", *build_table3(data3)))
+        sections.append(("Table 3: PhysSSM Ablation (A0-A5)", *build_table3(data3)))
     if data4:
-        sections.append(("Table 4: Computational Complexity & Resource Footprint", *build_table4(data4)))
+        sections.append(("Table 4: Computational Footprint", *build_table4(data4)))
 
     if not sections:
         print("No benchmark results found. Run scripts/run_benchmark.py first.")
@@ -117,10 +135,10 @@ def main():
     md.append("")
 
     csv_names = {
-        "Table 1: Main Multi-Year Forecasting Benchmark (WeatherBench 2m-Temperature)": "table1_main_benchmark",
-        "Table 2: Multi-Climatic Zone Generalization": "table2_climate_zones",
-        "Table 3: Comprehensive Ablation Study (730-Day Rollout)": "table3_ablations",
-        "Table 4: Computational Complexity & Resource Footprint": "table4_resources",
+        "Table 1: Short-to-Medium Forecast Skill": "table1_main_benchmark",
+        "Table 2: Cross-Site Long-Horizon (730-Day, 7 Sites)": "table2_climate_zones",
+        "Table 3: PhysSSM Ablation (A0-A5)": "table3_ablations",
+        "Table 4: Computational Footprint": "table4_resources",
     }
 
     for title, headers, rows in sections:
